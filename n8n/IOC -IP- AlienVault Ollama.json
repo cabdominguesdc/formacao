@@ -1,0 +1,306 @@
+{
+  "name": "IOC -IP- AlienVault Ollama",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ioc-intake",
+        "options": {}
+      },
+      "id": "708fcb34-2c14-44c6-8a0f-6ecf5a7748ef",
+      "name": "Webhook IOC Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2016,
+        192
+      ],
+      "webhookId": "ioc-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nconst rawIocs = Array.isArray(body.iocs) ? body.iocs : (body.ioc ? [body.ioc] : []);\nfunction detectType(v){\n  const s = String(v || '').trim();\n  if (!s) return 'unknown';\n  if (/^(https?:\\/\\/)/i.test(s)) return 'url';\n  if (/^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)$/.test(s)) return 'ip';\n  if (/^[a-fA-F0-9]{32}$/.test(s)) return 'md5';\n  if (/^[a-fA-F0-9]{40}$/.test(s)) return 'sha1';\n  if (/^[a-fA-F0-9]{64}$/.test(s)) return 'sha256';\n  if (/^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/i.test(s)) return 'domain';\n  return 'unknown';\n}\nreturn rawIocs.filter(Boolean).map(v => ({ json: { ioc: String(v).trim(), type: detectType(v), source: body.source || 'webhook' } }));"
+      },
+      "id": "59016c07-96c9-412b-81f9-6d86d0936dda",
+      "name": "Normalize IOC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1776,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "d68c10d5-d6a9-4b6f-800b-aaa1efbc7080",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "url",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "dbab5984-09a6-4952-b75e-43a751555b98",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "domain",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "8d0ac180-a866-4ea8-8a72-7bae12c290a1",
+      "name": "Is URL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1536,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "d68c10d5-d6a9-4b6f-800b-aaa1efbc7080",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "ip",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "67b8ae52-155f-4050-bca1-3b881b695d2f",
+      "name": "Is IP",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1296,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Coloca-se na posição de especialista de cibersegurança. Gera um report em Portugues de Portugal com base na informação obtida anteriormente pelo virustotal\n{{ JSON.stringify($json.validation) }}\n\nNo final do relatório, recomenda ações ao SOC.\n",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=Coloca-se na posição de especialista de cibersegurança. Gera um report com base na informação obtida anteriormente\n{{ $json.data.stixCyberObservables.edges[0] }}\n"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -544,
+        80
+      ],
+      "id": "cf62bc87-92fb-4187-a01e-0c907c37441a",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "llama3.2:latest",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        288
+      ],
+      "id": "ae6dc5c0-309c-4b28-bc90-be3d1743b963",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "6k8LjugRDpmkA6tS",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "no-reply@datacolab.pt",
+        "toEmail": "carlos.domingues@datacolab.pt",
+        "subject": "Report",
+        "html": "={{ $json.text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -112,
+        144
+      ],
+      "id": "46465b2c-7827-48c7-a5b8-1d2c57ef89e8",
+      "name": "Send an Email",
+      "webhookId": "be6029d2-e500-4994-b128-795790abd141",
+      "credentials": {
+        "smtp": {
+          "id": "Ay0p8YC9yPVBsrbT",
+          "name": "SMTP DataCoLAB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "GET",
+        "url": "=https://otx.alienvault.com/api/v1/indicators/ipv4/{{ $('Normalize IOC').item.json.ioc }}/general",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "alienVaultApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {},
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -928,
+        160
+      ],
+      "id": "8c5a51d7-9f77-440b-aa99-4047b79fc700",
+      "name": "AlienVault HTTP Request",
+      "extendsCredential": "alienVaultApi",
+      "credentials": {
+        "alienVaultApi": {
+          "id": "cSgF3REAfe7BUyYs",
+          "name": "AlienVault account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook IOC Intake": {
+      "main": [
+        [
+          {
+            "node": "Normalize IOC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize IOC": {
+      "main": [
+        [
+          {
+            "node": "Is URL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is URL?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Is IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is IP": {
+      "main": [
+        [
+          {
+            "node": "AlienVault HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send an Email": {
+      "main": [
+        []
+      ]
+    },
+    "AlienVault HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5bf2d3bb-bc87-4b23-8f35-86131a3c8d53",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1ffdf82a3991a2242a2b5b27c14612ecd17b43de142bd2cea7a7f2798dd26fc5"
+  },
+  "id": "koszCKegiiffJzI6",
+  "tags": []
+}
