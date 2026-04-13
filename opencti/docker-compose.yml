@@ -134,7 +134,7 @@ services:
       - REDIS__PORT=6379
       - ELASTICSEARCH__URL=http://elasticsearch:9200
       - ELASTICSEARCH__NUMBER_OF_REPLICAS=0
-      - MINIO__ENDPOINT=127.0.0.1
+      - MINIO__ENDPOINT=minio
       - MINIO__PORT=9000
       - MINIO__USE_SSL=false
       - MINIO__ACCESS_KEY=${MINIO_ROOT_USER}
