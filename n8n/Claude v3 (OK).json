@@ -1,0 +1,856 @@
+{
+  "name": "Claude v3 (OK)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ioc-intake",
+        "options": {}
+      },
+      "id": "da49e2f7-9785-494b-b587-76804319b88d",
+      "name": "Webhook IOC Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        240
+      ],
+      "webhookId": "ioc-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aceita { ioc: \"...\" }, { iocs: [...] } ou { ioc: [...] }\nconst body = $json.body ?? $json;\nconst rawIocs = Array.isArray(body.iocs)\n  ? body.iocs\n  : Array.isArray(body.ioc)\n    ? body.ioc\n    : body.ioc\n      ? [body.ioc]\n      : [];\n\nfunction detectType(v) {\n  const s = String(v || '').trim();\n  if (!s) return 'unknown';\n  if (/^(https?:\\/\\/)/i.test(s)) return 'url';\n  if (/^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)$/.test(s)) return 'ip';\n  if (/^[a-fA-F0-9]{32}$/.test(s)) return 'md5';\n  if (/^[a-fA-F0-9]{40}$/.test(s)) return 'sha1';\n  if (/^[a-fA-F0-9]{64}$/.test(s)) return 'sha256';\n  if (/^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/i.test(s)) return 'domain';\n  return 'unknown';\n}\n\nreturn rawIocs\n  .filter(Boolean)\n  .map(v => ({\n    json: {\n      ioc: String(v).trim(),\n      type: detectType(String(v).trim()),\n      source: body.source || 'webhook'\n    }\n  }));"
+      },
+      "id": "26b8f268-cb0d-431b-903c-9d2514201e2c",
+      "name": "Normalize IOC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "ip",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "rule-ip"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "domain",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "rule-domain"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "url",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "rule-url"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "md5",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "rule-md5"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "sha1",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "rule-sha1"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "sha256",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "rule-sha256"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a3416f76-a3c3-4852-9df6-a66cf586e6e1",
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -192,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ioc = $json.ioc || 'N/A';\nconst type = $json.type || 'unknown';\nconsole.warn(`[IOC Skip] Tipo não suportado: \"${type}\" para IoC \"${ioc}\"`);\nreturn [{ json: { skipped: true, ioc, type, reason: 'unsupported_type' } }];"
+      },
+      "id": "015142db-e346-4e64-a749-a3eb75d319af",
+      "name": "Skip — tipo desconhecido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://otx.alienvault.com/api/v1/indicators/IPv4/{{ $('Normalize IOC').item.json.ioc }}/general",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "alienVaultApi",
+        "options": {}
+      },
+      "id": "2da2711f-f70b-400b-ad1a-102a69eda29d",
+      "name": "AlienVault — IP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        -288
+      ],
+      "credentials": {
+        "alienVaultApi": {
+          "id": "cSgF3REAfe7BUyYs",
+          "name": "AlienVault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://otx.alienvault.com/api/v1/indicators/domain/{{ $('Normalize IOC').item.json.ioc }}/general",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "alienVaultApi",
+        "options": {}
+      },
+      "id": "1be59102-f4f0-461e-9213-8b9564984180",
+      "name": "AlienVault — Domain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        -112
+      ],
+      "credentials": {
+        "alienVaultApi": {
+          "id": "cSgF3REAfe7BUyYs",
+          "name": "AlienVault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nlet output = '==============================\\n';\noutput += `IOC REPORT — AlienVault OTX\\n`;\noutput += `Indicator: ${result.indicator || 'N/A'}\\n`;\noutput += `Type: ${result.type || 'N/A'}\\n`;\noutput += `Country: ${result.country_name || result.country_code || 'N/A'}\\n`;\noutput += `ASN: ${result.asn || 'N/A'}\\n`;\noutput += `Reputation: ${result.reputation ?? 'N/A'}\\n`;\noutput += `Pulse count: ${result.pulse_info?.count || 0}\\n\\n`;\nconst pulses = result.pulse_info?.pulses || [];\nif (pulses.length === 0) {\n  output += 'Nenhum pulse encontrado.\\n';\n} else {\n  pulses.slice(0, 10).forEach((pulse, i) => {\n    output += `--- Pulse ${i + 1} ---\\n`;\n    output += `Name: ${pulse.name || 'N/A'}\\n`;\n    output += `Description: ${(pulse.description || 'N/A').substring(0, 300)}\\n`;\n    output += `Tags: ${(pulse.tags || []).join(', ') || 'N/A'}\\n`;\n    output += `Malware families: ${(pulse.malware_families || []).map(m => m.display_name || m.id).join(', ') || 'N/A'}\\n`;\n    output += `Attack IDs (MITRE): ${(pulse.attack_ids || []).map(a => a.display_name || a.id).join(', ') || 'N/A'}\\n`;\n    output += `TLP: ${pulse.TLP || 'N/A'}\\n`;\n    output += `----------------------\\n`;\n  });\n}\noutput += '==============================\\n';\nreturn [{ json: { text: output.trim(), source: 'alienvault', ioc: result.indicator } }];"
+      },
+      "id": "3116bbee-98c7-4dd0-b670-e6278bdc2696",
+      "name": "Parse AlienVault",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/ip_addresses/{{ $('Normalize IOC').item.json.ioc }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "options": {}
+      },
+      "id": "d14bded7-8a5c-49a0-8ab0-0fd7519b93b7",
+      "name": "VirusTotal — IP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        16,
+        48
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "virusTotalApi": {
+          "id": "X1Dpvzmat4Q6cgBX",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/domains/{{ $('Normalize IOC').item.json.ioc }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "options": {}
+      },
+      "id": "1eb810be-45a2-4cd4-905a-40cc74841423",
+      "name": "VirusTotal — Domain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        208
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "virusTotalApi": {
+          "id": "X1Dpvzmat4Q6cgBX",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.virustotal.com/api/v3/urls",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $('Normalize IOC').item.json.ioc }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cb5162c6-3d2f-4fca-aba5-b60baca8da43",
+      "name": "VirusTotal — URL submit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        32,
+        544
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "virusTotalApi": {
+          "id": "X1Dpvzmat4Q6cgBX",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 45
+      },
+      "id": "e2ba7a76-7dc0-4789-87dc-7610d0485d1e",
+      "name": "Wait (URL)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        208,
+        448
+      ],
+      "webhookId": "wait-url-id"
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/analyses/{{ $json.data.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "options": {}
+      },
+      "id": "bc712e1c-6cec-4431-866a-4f4c52f3ee9e",
+      "name": "VirusTotal — URL get analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        400,
+        400
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "virusTotalApi": {
+          "id": "X1Dpvzmat4Q6cgBX",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/files/{{ $('Normalize IOC').item.json.ioc }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "options": {}
+      },
+      "id": "c0731942-6f15-4704-be77-54c1eeb0baa9",
+      "name": "VirusTotal — Hash (md5/sha1/sha256)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        16,
+        352
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "virusTotalApi": {
+          "id": "X1Dpvzmat4Q6cgBX",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst attrs = raw.data?.attributes || {};\nconst ioc = $('Normalize IOC').item.json.ioc;\nconst type = $('Normalize IOC').item.json.type;\nconst stats = attrs.last_analysis_stats || {};\nconst malicious = stats.malicious || 0;\nconst suspicious = stats.suspicious || 0;\nconst total = Object.values(stats).reduce((a, b) => a + b, 0);\nlet topEngines = [];\nif (attrs.last_analysis_results) {\n  topEngines = Object.entries(attrs.last_analysis_results)\n    .filter(([, r]) => r.category === 'malicious' || r.category === 'suspicious')\n    .map(([engine, r]) => `${engine}: ${r.result || r.category}`)\n    .slice(0, 10);\n}\nconst reputation = attrs.reputation ?? 'N/A';\nconst categories = attrs.categories ? Object.values(attrs.categories).join(', ') : 'N/A';\nconst names = (attrs.names || []).slice(0, 5).join(', ') || 'N/A';\nconst typeDesc = attrs.type_description || 'N/A';\nlet output = '==============================\\n';\noutput += `IOC REPORT — VirusTotal\\n`;\noutput += `IOC: ${ioc}\\nType: ${type}\\n`;\noutput += `Malicious: ${malicious}/${total}\\n`;\noutput += `Suspicious: ${suspicious}/${total}\\n`;\noutput += `Reputation: ${reputation}\\n`;\nif (type === 'ip' || type === 'domain') output += `Categories: ${categories}\\n`;\nif (type === 'md5' || type === 'sha1' || type === 'sha256') {\n  output += `Type description: ${typeDesc}\\n`;\n  output += `Known names: ${names}\\n`;\n}\nif (topEngines.length > 0) {\n  output += `\\nDetections:\\n`;\n  topEngines.forEach(e => { output += `  ${e}\\n`; });\n}\noutput += '==============================\\n';\nreturn [{ json: { text: output.trim(), source: 'virustotal', ioc } }];"
+      },
+      "id": "fa74b765-03fc-4ca2-9778-f5577baaf340",
+      "name": "Parse VirusTotal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Constrói a query GraphQL para o OpenCTI baseada no tipo de IoC\n// O OpenCTI usa a API GraphQL em /graphql\n// Pesquisamos stixCyberObservables por valor\nconst ioc = $('Normalize IOC').item.json.ioc;\nconst type = $('Normalize IOC').item.json.type;\n\n// Mapeia tipo local para tipo STIX/OpenCTI\nconst typeMap = {\n  ip:     'IPv4-Addr',\n  domain: 'Domain-Name',\n  url:    'Url',\n  md5:    'StixFile',\n  sha1:   'StixFile',\n  sha256: 'StixFile'\n};\nconst stixType = typeMap[type] || null;\n\n// Query GraphQL — busca o observable e as suas relações\nconst query = `\n  query SearchAllIoC {\n  stixCyberObservables(\n    search: \"` + ioc +  `\" \n    first: 25 \n  ) {\n    edges {\n      node {\n        id\n        entity_type\n        observable_value\n        created_at\n        updated_at\n        x_opencti_score\n        x_opencti_description\n        indicators {\n          edges {\n            node {\n              id\n              name\n              pattern\n              valid_from\n              valid_until\n            }\n          }\n        }\n      }\n    }\n    pageInfo {\n      hasNextPage\n      endCursor\n      globalCount\n    }\n  }\n}\n`;\n\nreturn [{ json: { query, variables: { value: ioc }, ioc, type } }];"
+      },
+      "id": "46207581-7c7d-4de0-a141-d734e815916a",
+      "name": "OpenCTI — Build Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.16.1.2:8080/graphql",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer flgrn_octi_tkn_aiSEEXkb4F5GjztM58rZ1vETg8De7hPCIQ8LRJzxmQMwxApoiVa7ogmRaOGNUXNP"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json.query, variables: $json.variables }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "0ef2fb4c-5509-424b-a3fc-63507e3b0d1c",
+      "name": "OpenCTI — GraphQL Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        320,
+        624
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse da resposta GraphQL do OpenCTI\nconst raw = $input.first().json;\nconst ioc = $('OpenCTI — Build Query').item.json.ioc;\nconst edges = raw?.data?.stixCyberObservables?.edges || [];\n\nif (edges.length === 0) {\n  return [{ json: {\n    text: `==============================\\nIOC REPORT — OpenCTI\\nIndicator: ${ioc}\\nResultado: Nenhum observable encontrado na plataforma OpenCTI.\\n==============================`,\n    source: 'opencti',\n    ioc\n  }}];\n}\n\nlet output = '==============================\\n';\noutput += `IOC REPORT — OpenCTI\\n`;\noutput += `Indicator: ${ioc}\\n\\n`;\n\nfor (const edge of edges) {\n  const node = edge.node;\n  output += `Entity type: ${node.entity_type || 'N/A'}\\n`;\n  output += `Value: ${node.observable_value || 'N/A'}\\n`;\n  output += `Created by: ${node.createdBy?.name || 'N/A'}\\n`;\n  const tlps = (node.objectMarking || []).map(m => m.definition).join(', ') || 'N/A';\n  output += `TLP: ${tlps}\\n\\n`;\n\n  // Relatórios associados\n  const reports = node.reports?.edges || [];\n  if (reports.length > 0) {\n    output += `Relatórios associados (${reports.length}):\\n`;\n    reports.forEach(r => {\n      const rn = r.node;\n      output += `  - ${rn.name || 'N/A'} (publicado: ${rn.published || 'N/A'}, confiança: ${rn.confidence ?? 'N/A'})\\n`;\n      if (rn.description) output += `    ${rn.description.substring(0, 200)}\\n`;\n    });\n    output += '\\n';\n  }\n\n  // Indicadores STIX\n  const indicators = node.indicators?.edges || [];\n  if (indicators.length > 0) {\n    output += `Indicadores STIX (${indicators.length}):\\n`;\n    indicators.forEach(i => {\n      const ind = i.node;\n      output += `  - ${ind.name || 'N/A'} | válido: ${ind.valid_from || '?'} → ${ind.valid_until || '?'} | confiança: ${ind.confidence ?? 'N/A'}\\n`;\n    });\n    output += '\\n';\n  }\n\n  // Relações (Threat Actors, Campanhas, Malware, ATT&CK)\n  const rels = node.stixRelationships?.edges || [];\n  const threatActors = [];\n  const intrusionSets = [];\n  const campaigns = [];\n  const malwares = [];\n  const attackPatterns = [];\n\n  for (const rel of rels) {\n    const to = rel.node?.to;\n    if (!to) continue;\n    const rt = rel.node.relationship_type;\n    if (to.malware_types !== undefined) malwares.push(`${to.name} (${(to.malware_types || []).join(', ') || 'N/A'})`);\n    else if (to.x_mitre_id !== undefined) attackPatterns.push(`${to.x_mitre_id}: ${to.name}`);\n    else if (to.first_seen !== undefined) campaigns.push(`${to.name} (${to.first_seen || '?'} → ${to.last_seen || '?'})`);\n    else if (to.aliases !== undefined && rt !== 'related-to') intrusionSets.push(`${to.name} (${(to.aliases || []).join(', ') || 'sem aliases'})`);\n    else if (to.aliases !== undefined) threatActors.push(`${to.name} (${(to.aliases || []).join(', ') || 'sem aliases'})`);\n  }\n\n  if (threatActors.length)   output += `Threat Actors:\\n  - ${threatActors.join('\\n  - ')}\\n\\n`;\n  if (intrusionSets.length)  output += `Intrusion Sets (APT):\\n  - ${intrusionSets.join('\\n  - ')}\\n\\n`;\n  if (campaigns.length)      output += `Campanhas:\\n  - ${campaigns.join('\\n  - ')}\\n\\n`;\n  if (malwares.length)       output += `Malware:\\n  - ${malwares.join('\\n  - ')}\\n\\n`;\n  if (attackPatterns.length) output += `MITRE ATT&CK Patterns:\\n  - ${attackPatterns.join('\\n  - ')}\\n\\n`;\n\n  output += '------------------------------\\n';\n}\n\noutput += '==============================\\n';\nreturn [{ json: { text: output.trim(), source: 'opencti', ioc } }];"
+      },
+      "id": "31c98b9e-5cd0-4fb8-a16a-54a560973b2e",
+      "name": "Parse OpenCTI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "04cb0f37-8653-4c2c-9169-0e3834f76bda",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        864,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combina AlienVault + VirusTotal + OpenCTI num único objecto para o Gemini\nconst allItems = $input.all();\nconst result = {\n  ioc: null,\n  type: null,\n  alienvault: null,\n  virustotal: null,\n  opencti: null\n};\n\nfor (const item of allItems) {\n  const d = item.json;\n  if (!result.ioc && d.ioc) result.ioc = d.ioc;\n  if (!result.type) {\n    try { result.type = $('Normalize IOC').first()?.json?.type || 'unknown'; } catch(e) {}\n  }\n  if (d.source === 'alienvault') result.alienvault = d;\n  if (d.source === 'virustotal') result.virustotal = d;\n  if (d.source === 'opencti')    result.opencti = d;\n}\n\nreturn [{ json: result }];"
+      },
+      "id": "cbcfa001-b947-4f26-aa94-46b2ad0e090a",
+      "name": "Aggregate for Gemini",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-pro",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-pro"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Assume o papel de um analista sénior de cibersegurança (SOC Tier 3).\n\nO seguinte Indicador de Compromisso (IoC) foi submetido para análise:\n- Valor: {{ $json.ioc }}\n- Tipo: {{ $json.type }}\n\nResultados de enriquecimento de três fontes distintas:\n\n## AlienVault OTX\n{{ $json.alienvault?.text || '(sem dados AlienVault)' }}\n\n## VirusTotal\n{{ $json.virustotal?.text || '(sem dados VirusTotal)' }}\n\n## OpenCTI (plataforma interna)\n{{ $json.opencti?.text || '(sem dados OpenCTI — observable não encontrado na plataforma)' }}\n\nProduz um relatório de análise completo em HTML válido (sem markdown, apenas HTML). O relatório deve incluir:\n1. <strong>Sumário executivo</strong> — veredicto claro (benigno / suspeito / malicioso) com nível de confiança (0-100%) baseado na convergência das três fontes\n2. <strong>Contexto de ataques e campanhas</strong> — este IoC está relacionado com campanhas ou ataques recentes? Quais? Correlaciona dados do OpenCTI com o AlienVault\n3. <strong>Grupos APT e Threat Actors</strong> — quais os grupos de ameaça associados? Inclui nomes, aliases, TTPs MITRE ATT&CK. Dá prioridade aos dados internos do OpenCTI\n4. <strong>Análise de detecções</strong> — interpretação dos resultados do VirusTotal e AlienVault, com ênfase em inconsistências entre fontes\n5. <strong>Contexto interno (OpenCTI)</strong> — o IoC já foi observado internamente? Tem relatórios associados? Indicadores STIX activos?\n6. <strong>Recomendações para a equipa SOC</strong> — acções concretas: bloquear, monitorizar, investigar, escalar? Com prioridade (CRÍTICA / ALTA / MÉDIA / BAIXA)\n7. <strong>Indicadores relacionados</strong> — outros IoCs que possam estar associados, com base nos dados das três fontes\n\nFormata o HTML com estilos inline profissionais. Usa cores para indicar severidade: vermelho (#c0392b) para malicioso, laranja (#e67e22) para suspeito, verde (#27ae60) para benigno, azul (#2980b9) para informativo. Inclui um header com o IoC analisado e timestamp."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "a099a7f5-ea64-43ba-83d7-0634e988324f",
+      "name": "Gemini — Análise IOC",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1312,
+        288
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "dZIqJ59J103xeJKx",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@datacolab.pt",
+        "toEmail": "carlos.domingues@datacolab.pt",
+        "subject": "Relatório IoCs",
+        "html": "={{ $json.content.parts[0].text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1664,
+        288
+      ],
+      "id": "50eca3b7-76d1-430f-9e87-e62fc198b6de",
+      "name": "Send an Email",
+      "webhookId": "ef398bdf-2c59-4fce-b411-37455f201f13",
+      "credentials": {
+        "smtp": {
+          "id": "Ay0p8YC9yPVBsrbT",
+          "name": "SMTP DataCoLAB"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook IOC Intake": {
+      "main": [
+        [
+          {
+            "node": "Normalize IOC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize IOC": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "AlienVault — IP",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "VirusTotal — IP",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenCTI — Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AlienVault — Domain",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "VirusTotal — Domain",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenCTI — Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VirusTotal — URL submit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenCTI — Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VirusTotal — Hash (md5/sha1/sha256)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenCTI — Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VirusTotal — Hash (md5/sha1/sha256)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenCTI — Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VirusTotal — Hash (md5/sha1/sha256)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenCTI — Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip — tipo desconhecido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AlienVault — IP": {
+      "main": [
+        [
+          {
+            "node": "Parse AlienVault",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AlienVault — Domain": {
+      "main": [
+        [
+          {
+            "node": "Parse AlienVault",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AlienVault": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal — IP": {
+      "main": [
+        [
+          {
+            "node": "Parse VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal — Domain": {
+      "main": [
+        [
+          {
+            "node": "Parse VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal — URL submit": {
+      "main": [
+        [
+          {
+            "node": "Wait (URL)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (URL)": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal — URL get analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal — URL get analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal — Hash (md5/sha1/sha256)": {
+      "main": [
+        [
+          {
+            "node": "Parse VirusTotal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse VirusTotal": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "OpenCTI — Build Query": {
+      "main": [
+        [
+          {
+            "node": "OpenCTI — GraphQL Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenCTI — GraphQL Request": {
+      "main": [
+        [
+          {
+            "node": "Parse OpenCTI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "Aggregate for Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate for Gemini": {
+      "main": [
+        [
+          {
+            "node": "Gemini — Análise IOC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini — Análise IOC": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse OpenCTI": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "cd66dbe0-d277-4b62-b8f1-a9db0ebdfabc",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1ffdf82a3991a2242a2b5b27c14612ecd17b43de142bd2cea7a7f2798dd26fc5"
+  },
+  "id": "hPkO8KuVIk7U1TSE",
+  "tags": []
+}
