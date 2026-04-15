@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <title>Enviar IOC</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f6f8;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .container {
+      background: #fff;
+      padding: 25px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      width: 420px;
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 8px;
+      margin-top: 5px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 15px;
+      width: 100%;
+      padding: 10px;
+      background-color: #007BFF;
+      border: none;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    button:hover { background-color: #0056b3; }
+    button:disabled { background-color: #7ab3e0; cursor: not-allowed; }
+
+    /* Spinner */
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Resultado */
+    .result {
+      margin-top: 16px;
+      border-radius: 6px;
+      overflow: hidden;
+      display: none;
+    }
+    .result-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .result.success .result-header { background: #d4edda; color: #155724; }
+    .result.error   .result-header { background: #f8d7da; color: #721c24; }
+
+    .result-body {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-top: none;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #333;
+    }
+
+    /* Tabela de campos do JSON */
+    .result-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4px;
+    }
+    .result-table td {
+      padding: 5px 6px;
+      border-bottom: 1px solid #e9ecef;
+      vertical-align: top;
+    }
+    .result-table td:first-child {
+      font-weight: bold;
+      color: #555;
+      white-space: nowrap;
+      width: 35%;
+    }
+    .result-table tr:last-child td { border-bottom: none; }
+
+    /* Bloco de texto puro */
+    .result-raw {
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .dot { font-size: 18px; line-height: 1; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h2>Enviar IOC</h2>
+
+  <label for="source">Source</label>
+  <input type="text" id="source" value="manual-test">
+
+  <label for="iocs">IOCs (um por linha)</label>
+  <textarea id="iocs" rows="4">169633d4668220a6d36227c772fdb159</textarea>
+
+  <button id="btn" onclick="enviar()">
+    <div class="spinner" id="spinner"></div>
+    <span id="btn-text">Enviar</span>
+  </button>
+
+  <div class="result" id="resultado">
+    <div class="result-header">
+      <span class="dot" id="result-icon"></span>
+      <span id="result-title"></span>
+    </div>
+    <div class="result-body" id="result-body"></div>
+  </div>
+</div>
+
+<script>
+async function enviar() {
+  const btn      = document.getElementById('btn');
+  const spinner  = document.getElementById('spinner');
+  const btnText  = document.getElementById('btn-text');
+  const resultEl = document.getElementById('resultado');
+  const icon     = document.getElementById('result-icon');
+  const title    = document.getElementById('result-title');
+  const body     = document.getElementById('result-body');
+
+  // Estado de carregamento
+  btn.disabled        = true;
+  spinner.style.display = 'block';
+  btnText.textContent = 'A aguardar resposta…';
+  resultEl.style.display = 'none';
+
+  const source   = document.getElementById('source').value;
+  const iocsText = document.getElementById('iocs').value;
+  const iocs     = iocsText.split('\n').map(i => i.trim()).filter(i => i);
+  const payload  = { source, iocs };
+
+  try {
+    const response = await fetch("https://n8n-workflow-automation.dev.datacolab.pt/webhook-test/ioc-file", {
+
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const text = await response.text();
+
+    resultEl.style.display = 'block';
+
+    if (response.ok) {
+      resultEl.className = 'result success';
+      icon.textContent   = '✔';
+      title.textContent  = `Sucesso (HTTP ${response.status})`;
+    } else {
+      resultEl.className = 'result error';
+      icon.textContent   = '✖';
+      title.textContent  = `Erro (HTTP ${response.status})`;
+    }
+
+    // Tentar mostrar como JSON formatado, senão mostrar texto
+    body.innerHTML = '';
+    try {
+      const json = JSON.parse(text);
+      body.appendChild(renderJSON(json));
+    } catch {
+      const pre = document.createElement('div');
+      pre.className   = 'result-raw';
+      pre.textContent = text || '(resposta vazia)';
+      body.appendChild(pre);
+    }
+
+  } catch (error) {
+    resultEl.style.display = 'block';
+    resultEl.className     = 'result error';
+    icon.textContent       = '✖';
+    title.textContent      = 'Erro de rede';
+    body.innerHTML         = '';
+    const pre = document.createElement('div');
+    pre.className   = 'result-raw';
+    pre.textContent = String(error);
+    body.appendChild(pre);
+  } finally {
+    btn.disabled          = false;
+    spinner.style.display = 'none';
+    btnText.textContent   = 'Enviar';
+  }
+}
+
+// Renderiza um objeto JSON numa tabela legível (suporta arrays e nested objects)
+function renderJSON(data) {
+  if (Array.isArray(data)) {
+    const wrap = document.createElement('div');
+    data.forEach((item, i) => {
+      const label = document.createElement('div');
+      label.style.cssText = 'font-weight:bold;color:#555;font-size:12px;margin-top:6px;';
+      label.textContent   = `Item ${i + 1}`;
+      wrap.appendChild(label);
+      wrap.appendChild(renderJSON(item));
+    });
+    return wrap;
+  }
+
+  if (data !== null && typeof data === 'object') {
+    const table = document.createElement('table');
+    table.className = 'result-table';
+    for (const [k, v] of Object.entries(data)) {
+      const tr = document.createElement('tr');
+      const tdKey = document.createElement('td');
+      tdKey.textContent = k;
+      const tdVal = document.createElement('td');
+      if (v !== null && typeof v === 'object') {
+        tdVal.appendChild(renderJSON(v));
+      } else {
+        tdVal.textContent = String(v);
+      }
+      tr.appendChild(tdKey);
+      tr.appendChild(tdVal);
+      table.appendChild(tr);
+    }
+    return table;
+  }
+
+  const span = document.createElement('span');
+  span.textContent = String(data);
+  return span;
+}
+</script>
+</body>
+</html>
