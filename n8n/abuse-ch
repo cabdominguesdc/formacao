@@ -1,0 +1,128 @@
+{
+  "name": "IOC -FILE- AlienVault + AbuseCH + Ollama",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ioc-file",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "dc284cea-5d7b-479d-8c59-565e49d91e1d",
+      "name": "Webhook IOC Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        32
+      ],
+      "webhookId": "00e9abe8-1bef-496c-adcc-04e5ecc83dcc"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nconst rawIocs = Array.isArray(body.iocs) ? body.iocs : (body.ioc ? [body.ioc] : []);\nfunction detectType(v){\n  const s = String(v || '').trim();\n  if (!s) return 'unknown';\n  if (/^(https?:\\/\\/)/i.test(s)) return 'url';\n  if (/^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)$/.test(s)) return 'ip';\n  if (/^[a-fA-F0-9]{32}$/.test(s)) return 'md5';\n  if (/^[a-fA-F0-9]{40}$/.test(s)) return 'sha1';\n  if (/^[a-fA-F0-9]{64}$/.test(s)) return 'sha256';\n  if (/^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/i.test(s)) return 'domain';\n  return 'unknown';\n}\nreturn rawIocs.filter(Boolean).map(v => ({ json: { ioc: String(v).trim(), type: detectType(v), source: body.source || 'webhook' } }));"
+      },
+      "id": "aeb29480-e793-4e76-811e-b97895db3609",
+      "name": "Normalize IOC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -848,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"ioc\": \"{{ $('Normalize IOC').item.json.ioc}}\",\n  \"type\": \"{{ $('Normalize IOC').item.json.type}}\",\n  \"abuse.ch_desc\": \"{{ $json.data[0].threat_type_desc }}\",\n  \"abuse.ch_url\": \"{{ $json.data[0].malware_malpedia }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -304,
+        32
+      ],
+      "id": "65a77b8d-69a3-4f2d-aad7-dbdc2daf895e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://threatfox-api.abuse.ch/api/v1/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Auth-Key",
+              "value": "46602965a8bf6a281fdb4d803152f13cf52354df8a4ef2c2"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"search_ioc\",\n  \"search_term\": \"{{ $json.ioc }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -640,
+        32
+      ],
+      "id": "f8175ff2-b417-4df9-9840-ced587d0743c",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook IOC Intake": {
+      "main": [
+        [
+          {
+            "node": "Normalize IOC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize IOC": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "24e74898-bf54-43db-9aa6-c5aae35d93ef",
+  "meta": {
+    "instanceId": "1ffdf82a3991a2242a2b5b27c14612ecd17b43de142bd2cea7a7f2798dd26fc5"
+  },
+  "id": "i1OP9kArjsrgjCpS",
+  "tags": []
+}
