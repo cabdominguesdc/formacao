@@ -1,0 +1,27 @@
+vim cria_users.sh
+
+
+
+chmod 755 cria_users.sh
+./cria_users.sh
+sudo apt update && sudo apt upgrade -y
+sudo apt install apache2 -y
+sudo apt install mysql-server -y
+sudo apt install php libapache2-mod-php php-mysql php-cli php-curl php-mbstring php-xml php-zip -y
+apache2 -v
+php -v
+mysql --version
+sudo systemctl start apache2
+sudo systemctl enable apache2
+sudo systemctl status apache2
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status
+sudo a2enmod rewrite
+sudo a2enmod ssl
+sudo systemctl restart apache2
+sudo chown -R $USER:www-data /var/www/html
+sudo chmod -R 755 /var/www/html
+sudo mysql_secure_installation
+ sudo mysql -u root -p
