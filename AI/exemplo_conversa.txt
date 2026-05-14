@@ -1,0 +1,69 @@
+Marta: Bom dia a todos. Obrigada pela presença. O objetivo desta reunião é alinhar expectativas para o projeto da nova plataforma de gestão de riscos e conformidade. Gostava de começar por confirmar os principais objetivos do cliente.
+João: Claro. Neste momento temos processos muito dispersos, alguns em Excel, outros em documentos partilhados. Queremos centralizar tudo numa única plataforma, especialmente o registo de riscos, controlos e evidências.
+Marta: Perfeito. E a prioridade inicial será mais focada em compliance ou também em gestão operacional?
+João: A primeira fase será compliance, principalmente alinhamento com ISO 27001 e NIS2. Mas queremos que a solução já fique preparada para crescer depois.
+Ana: Acrescentando ao que o João disse, precisamos também de trilhos de auditoria. Hoje não conseguimos saber facilmente quem alterou o quê.
+Ricardo: Isso significa que vamos precisar de histórico completo de alterações e provavelmente RBAC mais granular.
+Pedro: Quando falam em RBAC, estamos a pensar em perfis fixos ou permissões customizadas?
+Ana: Idealmente permissões customizadas. Temos equipas externas que só podem consultar alguns dados.
+Marta: Ok, então vou anotar como requisito: modelo de permissões flexível com segregação por entidade e por tipo de informação.
+Ricardo: Do lado técnico, queria validar uma questão. Existe alguma preferência tecnológica ou restrição de infraestrutura?
+João: Temos preferência por soluções open source. O ambiente principal corre em Kubernetes on-premises.
+Pedro: Isso ajuda. Podemos trabalhar com FastAPI no backend e PostgreSQL. Para autenticação, estava a pensar em Keycloak.
+Ana: Keycloak parece-me bem, desde que suporte MFA.
+Ricardo: Suporta, sem problema.
+Marta: Em relação a integrações, existe algum sistema prioritário?
+João: Sim. Precisamos integrar com GLPI e eventualmente com Wazuh numa fase posterior.
+Pedro: A integração com GLPI será apenas sincronização de ativos ou também tickets?
+João: Para já ativos e utilizadores.
+Ricardo: Isso reduz bastante a complexidade inicial.
+Marta: Falando agora de calendário. Temos alguma data crítica?
+João: Gostávamos de ter um MVP funcional até ao final de setembro para apresentar à auditoria interna.
+Pedro: Setembro é apertado se incluirmos já dashboards avançados.
+Ana: Os dashboards podem esperar. O importante é termos gestão de riscos, evidências e auditoria.
+Marta: Então podemos dividir em fases. Fase 1 com funcionalidades core e Fase 2 com reporting e automações.
+João: Faz sentido.
+Ricardo: Há outra questão importante: classificação da informação. Vamos precisar de diferentes níveis de confidencialidade?
+Ana: Sim. Alguns riscos são sensíveis e só devem ser visíveis para determinados responsáveis.
+Pedro: Então teremos de incluir controlo de acesso ao nível do objeto, não apenas do utilizador.
+Marta: Vou registar isso como requisito não funcional de segurança.
+João: Outra preocupação nossa é exportação de relatórios. A direção pede muitos PDFs para reuniões.
+Pedro: PDF e Excel?
+João: Sim, ambos.
+Ricardo: Em termos de arquitetura, eu sugeria API-first. Facilita futuras integrações.
+Marta: Concordo. E relativamente à metodologia, vamos trabalhar em sprints de duas semanas com demos regulares.
+João: Isso funciona bem para nós.
+Ana: Gostava também de incluir revisões de segurança ao longo do desenvolvimento, não apenas no final.
+Pedro: Excelente ideia. Podemos incluir checkpoints de segurança em cada sprint.
+Ricardo: E pipeline CI/CD com análise estática de código.
+Marta: Ótimo. Antes de fecharmos, queria validar responsabilidades. Do lado do cliente, quem será o ponto de contacto principal?
+João: Serei eu para temas funcionais e a Ana para compliance e validação de requisitos.
+Marta: Perfeito. Do nosso lado, eu trato da coordenação geral e o Ricardo lidera a componente técnica.
+Pedro: Quando começamos os workshops de levantamento detalhado?
+Marta: Proponho já na próxima terça-feira.
+João: Sem problema.
+Ana: Também queria pedir acesso antecipado a um protótipo, mesmo que simples, para validar nomenclaturas e fluxos.
+Pedro: Podemos preparar wireframes antes do desenvolvimento.
+Marta: Excelente. Então próximos passos:
+
+     
+
+    Envio da ata da reunião até amanhã.
+     
+
+    Planeamento dos workshops funcionais.
+     
+
+    Definição da arquitetura técnica inicial.
+     
+
+    Preparação de wireframes.
+     
+
+    Levantamento de requisitos de integração GLPI.
+
+João: Parece-me tudo alinhado.
+Ricardo: Da minha parte também.
+Ana: Igual.
+Pedro: Tudo ok.
+Marta: Obrigada a todos. Encerramos então a reunião
