@@ -1,0 +1,16 @@
+Quero uma aplicação que receba uma lista de IBANs (números de contas bancárias) e valide se todos os números são válidos. 
+A validação é feita da seguinte forma:
+O IBAN português é calculado adicionando "PT50" ao início do NIB (21 dígitos) e validando através de algoritmos de verificação (ISO 13616).
+O formato final tem 25 caracteres, estruturado como: PT + 2 dígitos de controlo + 21 dígitos do NIB. 
+
+Estrutura do IBAN em Portugal
+PT (2 letras): Código do país (Portugal).
+50 (2 dígitos): Dígitos de controlo calculados.
+NIB (21 dígitos): Número de Identificação Bancária (Banco + Balcão + Conta + 2 dígitos de controlo). [1, 2]
+
+Como Calcular os Dígitos de Controlo (PT50)
+O cálculo é baseado na norma ISO 7064 (MOD 97-10): 
+Reorganizar: Juntar os dígitos do NIB, seguidos de "PT" e depois "00" (ex: NIB + PT + 00).
+Converter letras: Substituir P=25 e T=29.
+Calcular Resto: Dividir o número grande por 97 e encontrar o resto da divisão.
+Finalizar: Subtrair o resto de 98 (\(98 - \text{resto}\)). Se o resultado for inferior a 10, adicionar um zero à esquerda
