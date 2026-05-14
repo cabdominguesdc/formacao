@@ -1,0 +1,14 @@
+Quero criar um artefacto que faça a comparação e avaliação de propostas para aquisição de equipamentos tecnológicos,
+incluindo análise de fornecedores, preços, requisitos técnicos, critérios de conformidade, scoring, aprovação interna e decisão final de compra.
+
+O perfil de uso é profissional / Organizacional — utilização por equipas de operações, IT, compras, investigação e gestão de projetos numa organização tecnológica e de inovação.
+
+Quero um formulário estruturado para submissão de propostas
+Quero a comparação automática entre fornecedores
+Quero a produção da matriz de scoring técnico e financeiro
+Quero possibilidade de exportação dos mapas comparativos em Excel/PDF
+Inclui campos de avaliação técnica, compliance e risco
+Permite comentários e revisão
+Estado da proposta (em análise, aprovada, rejeitada, pendente)
+Possibilidade de definir pesos por critério de avaliação
+Geração automática de relatório de decisão de compra
