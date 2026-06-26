@@ -1,0 +1,674 @@
+{
+  "name": "CVE Enrichment Pipeline v5 - DataCoLAB",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cve-enrich",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c70c681e-16f9-4555-b7a5-02f721c216ee",
+      "name": "Webhook (POST /cve-enrich)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        0
+      ],
+      "webhookId": "cve-enrich-datacolab"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ====================================================\n// 1. Normalização do payload de entrada\n// ====================================================\n// Aceita:\n//   a) { \"cves\": [\"CVE-2024-1234\", \"CVE-2025-9999\"] }\n//   b) [\"CVE-2024-1234\", \"CVE-2025-9999\"]\n//   c) { \"cves\": [{ \"id\": \"...\", \"asset\": \"...\", \"exposure\": \"internet\", \"criticality\": \"critical\" }, ...] }\n//\n// Suporta também metadata opcional:\n//   { \"meta\": { \"requestor\": \"carlos.domingues\", \"source\": \"openvas-scan-2026-05-19\" }, \"cves\": [...] }\n\nconst rawBody = $input.first().json.body ?? $input.first().json;\nlet list = [];\nlet meta = {};\n\nif (Array.isArray(rawBody)) {\n  list = rawBody;\n} else if (Array.isArray(rawBody.cves)) {\n  list = rawBody.cves;\n  meta = rawBody.meta ?? {};\n} else if (rawBody.cve) {\n  list = [rawBody.cve];\n} else {\n  throw new Error('Payload inválido. Esperado: { cves: [...] } ou array de CVEs.');\n}\n\nif (list.length === 0) throw new Error('Lista de CVEs vazia.');\nif (list.length > 300) throw new Error('Lote demasiado grande (>200). Dividir em vários pedidos.');\n\nconst requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;\nconst cvePattern = /^CVE-\\d{4}-\\d{4,}$/i;\n\nconst items = list.map((entry) => {\n  let cve, asset = null, exposure = 'internal', criticality = 'medium';\n  if (typeof entry === 'string') {\n    cve = entry.trim().toUpperCase();\n  } else if (typeof entry === 'object' && entry !== null) {\n    cve = (entry.id || entry.cve || '').trim().toUpperCase();\n    asset = entry.asset ?? null;\n    exposure = (entry.exposure ?? 'internal').toLowerCase();\n    criticality = (entry.criticality ?? 'medium').toLowerCase();\n  }\n  if (!cve || !cvePattern.test(cve)) {\n    throw new Error(`Entrada inválida: '${JSON.stringify(entry)}'. Esperado formato CVE-YYYY-NNNN.`);\n  }\n  return {\n    json: {\n      cve, asset, exposure, criticality,\n      _request_id: requestId,\n      _meta: meta\n    }\n  };\n});\n\nreturn items;"
+      },
+      "id": "de8ca50d-7e67-4cc3-b81a-aec8583b9ca8",
+      "name": "Normalizar payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={{ $json.cve }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "DataCoLAB-VulnMgmt/3.0"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "de0a433d-4b88-4386-9996-206c89ab4bc8",
+      "name": "NVD API 2.0",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -496,
+        -240
+      ],
+      "notes": "NVD: 5 req/30s sem key, 50 req/30s com apiKey. Configurar header se aplicável."
+    },
+    {
+      "parameters": {
+        "url": "=https://api.first.org/data/v1/epss?cve={{ $json.cve }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "9ebbbd84-d912-45fd-87ca-bc73044b2403",
+      "name": "EPSS (FIRST.org)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -496,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 DataCoLAB-VulnMgmt/3.0"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "4ea129a4-4336-4377-b377-81635e8fb7c1",
+      "name": "CISA KEV (catálogo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -496,
+        80
+      ],
+      "notes": "Para lotes grandes, cachear com Redis ou staticData (TTL 1h).",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "url": "=https://www.exploit-db.com/search?cve={{ $json.cve.replace('CVE-','') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 DataCoLAB-VulnMgmt/3.0"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "ffdd59f3-eeaf-436e-933d-0a06b90a47bd",
+      "name": "ExploitDB (HTML search)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -496,
+        240
+      ],
+      "disabled": true,
+      "notes": "Sem API oficial. Em produção, considerar searchsploit local ou OpenCTI."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Heurística: presença do CVE em contexto de exploit na página\nconst html = $json.data ?? $json.body ?? '';\nconst cve = $('Normalizar payload').item.json.cve;\nconst hasExploit = typeof html === 'string'\n  && html.includes(cve)\n  && /exploit|<table|exploits-table/i.test(html);\nreturn [{\n  json: {\n    cve,\n    exploit_db_match: hasExploit,\n    exploit_db_url: `https://www.exploit-db.com/search?cve=${cve.replace('CVE-','')}`\n  }\n}];"
+      },
+      "id": "089b5985-58ee-43c6-9761-4a14ae9de42a",
+      "name": "Parse ExploitDB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ====================================================\n// Consolidação + Risk Score — processa TODOS os items\n// (compatível com modo 'Run Once for All Items')\n// ====================================================\nconst allGrouped  = $input.all().map(i => i.json);\nconst allOriginal = $('Normalizar payload').all().map(i => i.json);\n\nconst critMap = { critical: 2.0, high: 1.5, medium: 1.0, low: 0.7 };\nconst expMap  = { internet: 2.0, dmz: 1.5, internal: 1.0 };\n\nconst results = [];\n\nfor (const grouped of allGrouped) {\n  const cve      = grouped.cve;\n  const original = allOriginal.find(i => i.cve === cve) ?? {};\n\n  // --- NVD ---\n  const nvdRaw   = grouped._nvd ?? {};\n  const nvdEntry = nvdRaw?.vulnerabilities?.[0]?.cve ?? null;\n\n  let cvssScore=null, cvssVector=null, cvssVersion=null, cvssSeverity=null;\n  let cwes=[], description=null, published=null, lastModified=null, references=[];\n\n  if (nvdEntry) {\n    description  = (nvdEntry.descriptions ?? []).find(d => d.lang === 'en')?.value ?? null;\n    published    = nvdEntry.published ?? null;\n    lastModified = nvdEntry.lastModified ?? null;\n    references   = (nvdEntry.references ?? []).map(r => r.url).slice(0, 10);\n    cwes = (nvdEntry.weaknesses ?? [])\n      .flatMap(w => (w.description ?? []).map(d => d.value))\n      .filter(v => /^CWE-/i.test(v));\n    const m = nvdEntry.metrics ?? {};\n    const v31 = m.cvssMetricV31?.[0]?.cvssData;\n    const v30 = m.cvssMetricV30?.[0]?.cvssData;\n    const v2  = m.cvssMetricV2?.[0]?.cvssData;\n    const chosen = v31 || v30 || v2;\n    if (chosen) {\n      cvssScore    = chosen.baseScore;\n      cvssVector   = chosen.vectorString;\n      cvssVersion  = chosen.version;\n      cvssSeverity = m.cvssMetricV31?.[0]?.cvssData?.baseSeverity\n        || m.cvssMetricV30?.[0]?.cvssData?.baseSeverity\n        || m.cvssMetricV2?.[0]?.baseSeverity\n        || null;\n    }\n  }\n\n  // --- EPSS ---\n  const epssRaw        = grouped._epss ?? {};\n  const epssEntry      = epssRaw?.data?.[0] ?? null;\n  const epssScore      = epssEntry ? parseFloat(epssEntry.epss) : null;\n  const epssPercentile = epssEntry ? parseFloat(epssEntry.percentile) : null;\n\n  // --- KEV ---\n  const kev = grouped._kev ?? {};\n\n  // --- ExploitDB ---\n  const edb = grouped._edb ?? {};\n\n  // --- Risk Score ---\n  const hasExploit   = !!(edb.exploit_db_match) || (epssScore !== null && epssScore >= 0.5) || !!kev.in_kev;\n  const exploitMult  = hasExploit ? 1.5 : 1.0;\n  const exposureMult = expMap[original.exposure]     ?? 1.0;\n  const critMult     = critMap[original.criticality] ?? 1.0;\n\n  let riskScore = Math.round((cvssScore ?? 0) * exploitMult * exposureMult * critMult * 100) / 100;\n\n  let band = 'Baixo', sla = 'Backlog';\n  if (riskScore >= 35)      { band = 'Crítico'; sla = '24-72h'; }\n  else if (riskScore >= 20) { band = 'Alto';    sla = '7 dias'; }\n  else if (riskScore >= 10) { band = 'Médio';   sla = '30 dias'; }\n  if (kev.in_kev)           { band = 'Crítico'; sla = '24-72h'; }\n\n  results.push({\n    json: {\n      cve,\n      asset:             original.asset        ?? null,\n      exposure:          original.exposure      ?? null,\n      asset_criticality: original.criticality   ?? null,\n      _request_id:       original._request_id   ?? null,\n      _meta:             original._meta         ?? {},\n      nvd: {\n        description, published, last_modified: lastModified,\n        cvss_score: cvssScore, cvss_vector: cvssVector,\n        cvss_version: cvssVersion, cvss_severity: cvssSeverity,\n        cwes, references_top: references\n      },\n      epss: { score: epssScore, percentile: epssPercentile },\n      kev: {\n        in_kev:           !!kev.in_kev,\n        date_added:       kev.kev_date_added      ?? null,\n        due_date:         kev.kev_due_date        ?? null,\n        known_ransomware: !!kev.kev_known_ransomware,\n        required_action:  kev.kev_required_action ?? null\n      },\n      exploit_db: { match: !!edb.exploit_db_match, url: edb.exploit_db_url ?? null },\n      risk: {\n        exploit_available: hasExploit,\n        multipliers: { exploit: exploitMult, exposure: exposureMult, criticality: critMult },\n        risk_score: riskScore,\n        band, sla\n      }\n    }\n  });\n}\n\nreturn results;\n",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "6da77130-7e97-4827-9ba0-f07e9f24e5da",
+      "name": "Consolidar + Risk Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge análise IA — resposta única do Ollama com array de análises\nconst ollamaResponse = $json?.response ?? $json?.text ?? '[]';\nconst prepNode = $('Preparar prompt IA').first().json;\nconst allEnriched = prepNode._all_enriched ?? [];\n\nlet analyses = [];\ntry {\n  const parsed = JSON.parse(ollamaResponse);\n  analyses = Array.isArray(parsed) ? parsed : [parsed];\n} catch (e) {\n  // Se o parse falhar, devolver todos os CVEs com erro\n  return allEnriched.map(item => ({\n    json: {\n      ...item,\n      ai_analysis: {\n        resumo: null, impacto_negocio: null, accao_recomendada: null,\n        prioridade_sugerida: null, justificacao: null,\n        _parse_error: e.message, _raw: ollamaResponse\n      },\n      _enriched_at: new Date().toISOString()\n    }\n  }));\n}\n\n// Match por cve entre análise IA e dados enriquecidos\nreturn allEnriched.map(item => {\n  const ai = analyses.find(a => (a.cve ?? '').toUpperCase() === item.cve.toUpperCase())\n          ?? analyses[allEnriched.indexOf(item)]\n          ?? {};\n  return {\n    json: {\n      ...item,\n      ai_analysis: {\n        resumo:              ai.resumo              ?? null,\n        impacto_negocio:     ai.impacto_negocio     ?? null,\n        accao_recomendada:   ai.accao_recomendada   ?? null,\n        prioridade_sugerida: ai.prioridade_sugerida ?? null,\n        justificacao:        ai.justificacao        ?? null\n      },\n      _enriched_at: new Date().toISOString()\n    }\n  };\n});\n",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "aee84f0b-239e-4426-9ed0-dbef90a049e9",
+      "name": "Merge análise IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Agregação final\nconst items = $input.all().map(i => i.json);\nconst summary = {\n  total: items.length,\n  critical: items.filter(i => i.risk.band === 'Crítico').length,\n  high:     items.filter(i => i.risk.band === 'Alto').length,\n  medium:   items.filter(i => i.risk.band === 'Médio').length,\n  low:      items.filter(i => i.risk.band === 'Baixo').length,\n  in_kev:   items.filter(i => i.kev.in_kev).length,\n  with_exploit: items.filter(i => i.risk.exploit_available).length,\n  ransomware:   items.filter(i => i.kev.known_ransomware).length\n};\nreturn [{\n  json: {\n    request_id: items[0]?._request_id ?? null,\n    generated_at: new Date().toISOString(),\n    meta: items[0]?._meta ?? {},\n    summary,\n    findings: items\n  }\n}];"
+      },
+      "id": "0055e561-7d05-4f6e-b4cf-a8c9c8b89a6d",
+      "name": "Agregar resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ====================================================\n// 3. Gerar ficheiro JSON (binário) com o output completo\n// ====================================================\nconst payload = $input.first().json;\nconst json = JSON.stringify(payload, null, 2);\nconst buffer = Buffer.from(json, 'utf-8');\nconst ts = new Date().toISOString().replace(/[:.]/g, '-');\nconst filename = `cve_enrichment_${ts}.json`;\n\nreturn [{\n  json: payload,\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'application/json',\n      fileName: filename,\n      fileExtension: 'json'\n    }\n  }\n}];"
+      },
+      "id": "bd2a547a-f902-4986-b8b3-e7d2d5b5d124",
+      "name": "Construir ficheiro JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fileSelector": "=/data/cve-enrichment/cve_enrichment_{{ $now.toFormat(\"yyyy-MM-dd_HH-mm-ss\") }}.json",
+        "options": {}
+      },
+      "id": "f8d501ce-54b2-4d95-90e4-bc12cc926356",
+      "name": "Gravar ficheiro JSON (disco)",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        -80
+      ],
+      "notes": "Ajustar o caminho. Pasta tem de ser writable pelo container n8n. Para AWS, considerar nó S3 em vez deste."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ request_id: $('Agregar resposta').item.json.request_id, summary: $('Agregar resposta').item.json.summary, message: 'Enrichment completed. JSON file written and email dispatched.' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "c43693b6-7717-4d53-9633-86a5ff172b1f",
+      "name": "HTTP Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1744,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Constrói corpo HTML do email com resumo + top findings + análise IA completa\nconst p = $input.first().json;\nconst s = p.summary;\n\nconst bandColor = (b) => ({\n  'Crítico': '#C00000',\n  'Alto':    '#ED7D31',\n  'Médio':   '#BF9000',\n  'Baixo':   '#548235'\n})[b] ?? '#666';\n\n// ── Top 10 findings (ordenados por Risk Score) ────────────────\nconst top = [...p.findings]\n  .sort((a, b) => (b.risk.risk_score ?? 0) - (a.risk.risk_score ?? 0))\n  .slice(0, 10);\n\nconst rows = top.map(f => `\n  <tr>\n    <td style=\"padding:6px 10px;border:1px solid #DDD;font-family:Consolas,monospace;\">${f.cve}</td>\n    <td style=\"padding:6px 10px;border:1px solid #DDD;color:${bandColor(f.risk.band)};font-weight:bold;\">${f.risk.band}</td>\n    <td style=\"padding:6px 10px;border:1px solid #DDD;text-align:right;\">${f.risk.risk_score}</td>\n    <td style=\"padding:6px 10px;border:1px solid #DDD;text-align:right;\">${f.nvd.cvss_score ?? '-'}</td>\n    <td style=\"padding:6px 10px;border:1px solid #DDD;text-align:right;\">${f.epss.score ?? '-'}</td>\n    <td style=\"padding:6px 10px;border:1px solid #DDD;\">${f.kev.in_kev ? '⚠️ Sim' : 'Não'}</td>\n    <td style=\"padding:6px 10px;border:1px solid #DDD;\">${f.asset ?? '-'}</td>\n    <td style=\"padding:6px 10px;border:1px solid #DDD;font-size:12px;\">${(f.ai_analysis?.accao_recomendada ?? '').toString().slice(0, 120)}</td>\n  </tr>`).join('');\n\n// ── Análise IA detalhada (todos os CVEs) ─────────────────────\nconst aiRows = [...p.findings]\n  .sort((a, b) => (b.risk.risk_score ?? 0) - (a.risk.risk_score ?? 0))\n  .map(f => {\n    const ai = f.ai_analysis ?? {};\n    return `\n    <tr style=\"vertical-align:top;\">\n      <td style=\"padding:8px 10px;border:1px solid #DDD;font-family:Consolas,monospace;white-space:nowrap;\">${f.cve}</td>\n      <td style=\"padding:8px 10px;border:1px solid #DDD;color:${bandColor(f.risk.band)};font-weight:bold;\">${f.risk.band}</td>\n      <td style=\"padding:8px 10px;border:1px solid #DDD;font-size:13px;\">${ai.resumo ?? '-'}</td>\n      <td style=\"padding:8px 10px;border:1px solid #DDD;font-size:13px;\">${ai.impacto_negocio ?? '-'}</td>\n      <td style=\"padding:8px 10px;border:1px solid #DDD;font-size:13px;\">${ai.accao_recomendada ?? '-'}</td>\n      <td style=\"padding:8px 10px;border:1px solid #DDD;font-size:13px;\">${ai.prioridade_sugerida ?? '-'}</td>\n      <td style=\"padding:8px 10px;border:1px solid #DDD;font-size:12px;color:#666;\">${ai.justificacao ?? '-'}</td>\n    </tr>`;\n  }).join('');\n\nconst aiSection = `\n  <h3 style=\"color:#1F4E79;margin-top:28px;\">Análise IA detalhada (todos os CVEs)</h3>\n  <table style=\"border-collapse:collapse;font-size:13px;width:100%;\">\n    <thead><tr style=\"background:#1F4E79;color:#FFF;\">\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">CVE</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Banda</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Resumo</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Impacto Negócio</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Acção Recomendada</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Prioridade</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Justificação</th>\n    </tr></thead>\n    <tbody>${aiRows}</tbody>\n  </table>`;\n\n// ── Linha de metadados ────────────────────────────────────────\nconst metaLine = p.meta && Object.keys(p.meta).length\n  ? `<p style=\"color:#666;font-size:13px;margin:4px 0;\">Origem: ${Object.entries(p.meta).map(([k,v]) => `<b>${k}</b>=${v}`).join(' · ')}</p>`\n  : '';\n\n// ── HTML final ────────────────────────────────────────────────\nconst html = `\n<div style=\"font-family:Calibri,Arial,sans-serif;font-size:14px;color:#222;max-width:960px;\">\n  <h2 style=\"color:#1F4E79;margin-bottom:4px;\">DataCoLAB · Enrichment de CVEs concluído</h2>\n  <p style=\"color:#666;margin:0;\">Request <code>${p.request_id}</code></p>\n  <p style=\"color:#666;margin:0;\">Gerado em ${p.generated_at}</p>\n  ${metaLine}\n\n  <h3 style=\"color:#1F4E79;margin-top:20px;\">Resumo</h3>\n  <table style=\"border-collapse:collapse;font-size:14px;\">\n    <tr><td style=\"padding:4px 12px 4px 0;\">Total de CVEs analisados</td><td style=\"padding:4px 0;\"><b>${s.total}</b></td></tr>\n    <tr><td style=\"padding:4px 12px 4px 0;\">Críticos</td><td style=\"padding:4px 0;color:#C00000;\"><b>${s.critical}</b></td></tr>\n    <tr><td style=\"padding:4px 12px 4px 0;\">Altos</td><td style=\"padding:4px 0;color:#ED7D31;\"><b>${s.high}</b></td></tr>\n    <tr><td style=\"padding:4px 12px 4px 0;\">Médios</td><td style=\"padding:4px 0;color:#BF9000;\"><b>${s.medium}</b></td></tr>\n    <tr><td style=\"padding:4px 12px 4px 0;\">Baixos</td><td style=\"padding:4px 0;color:#548235;\"><b>${s.low}</b></td></tr>\n    <tr><td style=\"padding:4px 12px 4px 0;\">Em CISA KEV</td><td style=\"padding:4px 0;\"><b>${s.in_kev}</b></td></tr>\n    <tr><td style=\"padding:4px 12px 4px 0;\">Com exploit conhecido</td><td style=\"padding:4px 0;\"><b>${s.with_exploit}</b></td></tr>\n    <tr><td style=\"padding:4px 12px 4px 0;\">Associados a ransomware</td><td style=\"padding:4px 0;\"><b>${s.ransomware}</b></td></tr>\n  </table>\n\n  <h3 style=\"color:#1F4E79;margin-top:20px;\">Top findings (até 10, ordenados por Risk Score)</h3>\n  ${rows ? `<table style=\"border-collapse:collapse;font-size:13px;width:100%;\">\n    <thead><tr style=\"background:#1F4E79;color:#FFF;\">\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">CVE</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Banda</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:right;\">Risk</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:right;\">CVSS</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:right;\">EPSS</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">KEV</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Ativo</th>\n      <th style=\"padding:6px 10px;border:1px solid #1F4E79;text-align:left;\">Acção sugerida (IA)</th>\n    </tr></thead>\n    <tbody>${rows}</tbody>\n  </table>` : '<p style=\"color:#666;\">Sem findings.</p>'}\n\n  ${aiSection}\n\n  <p style=\"margin-top:20px;padding:12px;background:#F2F6FA;border-left:3px solid #1F4E79;font-size:13px;color:#444;\">\n    Análise IA produzida por <b>gemma4:26b</b> via Ollama. Ficheiro JSON completo (${s.total} findings) em anexo.\n  </p>\n  <p style=\"color:#999;font-size:11px;margin-top:16px;\">DataCoLAB · Programa de Gestão de Vulnerabilidades · email automático</p>\n</div>`;\n\nreturn [{\n  json: {\n    email_subject: `[DataCoLAB] CVE Enrichment · ${s.total} CVEs · ${s.critical} críticos · ${s.in_kev} em KEV`,\n    email_html: html,\n    payload: p\n  },\n  binary: $input.first().binary\n}];\n"
+      },
+      "id": "b605a9f2-c4d8-4541-90df-e0f1e320a862",
+      "name": "Construir email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@datacolab.pt",
+        "toEmail": "carlos.domingues@datacolab.pt",
+        "subject": "={{ $json.email_subject }}",
+        "html": "={{ $json.email_html }}",
+        "options": {
+          "attachments": "data"
+        }
+      },
+      "id": "25c9569e-c86d-4856-b4cb-69956c543b51",
+      "name": "Email - SOC + DevSecOps",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1968,
+        80
+      ],
+      "webhookId": "6b4d8edc-acab-49f3-abcd-fa5e2a8893a6",
+      "credentials": {
+        "smtp": {
+          "id": "Ay0p8YC9yPVBsrbT",
+          "name": "SMTP DataCoLAB"
+        }
+      },
+      "notes": "Configurar credencial SMTP (ou Microsoft 365 / Gmail). Substituir destinatários."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "message": "És um analista sénior de cibersegurança no DataCoLAB. Recebes uma lista de vulnerabilidades já enriquecidas e produces análise concisa em PORTUGUÊS DE PORTUGAL.\\n\\nDevolve APENAS um array JSON (sem markdown, sem comentários) com exactamente um objecto por CVE, na mesma ordem da lista recebida, com estas chaves obrigatórias:\\n- cve (string, o ID do CVE)\\n- resumo (string, máx 2 frases)\\n- impacto_negocio (string, 1 frase, contextualizado para um data lab / centro de competências)\\n- accao_recomendada (string, máx 3 ações separadas por ' | ')\\n- prioridade_sugerida (uma de: imediata, alta, normal, baixa)\\n- justificacao (string, 1 frase, refere CVSS, EPSS e KEV se aplicável)\\n\\nDados:\\n\" + JSON.stringify($json.prompt_payload)"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        848,
+        0
+      ],
+      "id": "3f608fd5-41cc-417e-9655-015a8af07604",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "gemma4:26b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmOllama",
+      "typeVersion": 1,
+      "position": [
+        848,
+        160
+      ],
+      "id": "410190bc-af05-4afb-8386-04aa18767f69",
+      "name": "Ollama Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "6k8LjugRDpmkA6tS",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "id": "4b9da813-ff51-44ca-a9f8-52a707f692de",
+      "name": "Merge NVD+EPSS",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -272,
+        -160
+      ],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
+      "id": "2a2dcdf6-3f2f-486a-bc96-ccab5811ca3a",
+      "name": "Merge +ExploitDB",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        112,
+        0
+      ],
+      "parameters": {
+        "mode": "append"
+      }
+    },
+    {
+      "id": "c2ce1ffd-16e8-440c-a1ed-f3b57f91ee5b",
+      "name": "Group by CVE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Group by CVE — reagrupa todos os ramos e faz lookup KEV interno\n// Recebe: NVD×N + EPSS×N + CISA KEV×1 (catálogo completo) + ExploitDB×N\nconst all = $input.all().map(i => i.json);\n\n// 1. Separar o catálogo KEV\n// FIX v5: deteção por catalogVersion (campo exclusivo da KEV API) — robusto a respostas parciais\n// Fallback: array vulnerabilities com >10 entradas (compatibilidade)\nconst kevCatalog = all.find(item => item.catalogVersion !== undefined)\n  ?? all.find(item => Array.isArray(item.vulnerabilities) && item.vulnerabilities.length > 10);\nconst kevVulns = kevCatalog?.vulnerabilities ?? [];\n\n// 2. Descobrir lista de CVEs pelo EPSS (campo data[0].cve garantido)\nconst cveSet = new Set();\nfor (const item of all) {\n  if (Array.isArray(item.data) && item.data[0]?.cve) {\n    cveSet.add(item.data[0].cve.toUpperCase());\n  }\n}\nconst cveList = [...cveSet];\n\n// 3. Inicializar grouped\nconst grouped = {};\nfor (const cve of cveList) {\n  grouped[cve] = { cve, _nvd: {}, _epss: {}, _kev: {}, _edb: {} };\n}\n\n// 4. Distribuir NVD, EPSS, ExploitDB\nfor (const item of all) {\n  // Ignorar o catálogo KEV (já tratado acima)\n  if (item.catalogVersion !== undefined) continue;\n  if (Array.isArray(item.vulnerabilities) && item.vulnerabilities.length > 10) continue;\n\n  // NVD: tem totalResults ou vulnerabilities (pequeno, 1 CVE)\n  if (item.totalResults !== undefined || item.vulnerabilities !== undefined) {\n    const id = (item.vulnerabilities?.[0]?.cve?.id ?? '').toUpperCase();\n    if (id && grouped[id]) {\n      grouped[id]._nvd = item;\n    } else {\n      const fallback = cveList.find(c => Object.keys(grouped[c]._nvd).length === 0);\n      if (fallback) grouped[fallback]._nvd = item;\n    }\n    continue;\n  }\n  // EPSS\n  if (Array.isArray(item.data) && item.data[0]?.cve) {\n    const cve = item.data[0].cve.toUpperCase();\n    if (grouped[cve]) grouped[cve]._epss = item;\n    continue;\n  }\n  // ExploitDB\n  if (item.exploit_db_match !== undefined && item.cve) {\n    const cve = item.cve.toUpperCase();\n    if (grouped[cve]) grouped[cve]._edb = item;\n    continue;\n  }\n}\n\n// 5. Lookup KEV interno para cada CVE\nfor (const cve of cveList) {\n  const entry = kevVulns.find(v => (v.cveID ?? '').toUpperCase() === cve);\n  grouped[cve]._kev = {\n    cve,\n    in_kev:                !!entry,\n    kev_date_added:        entry?.dateAdded         ?? null,\n    kev_due_date:          entry?.dueDate           ?? null,\n    kev_vendor:            entry?.vendorProject     ?? null,\n    kev_product:           entry?.product           ?? null,\n    kev_short_description: entry?.shortDescription  ?? null,\n    kev_required_action:   entry?.requiredAction    ?? null,\n    kev_known_ransomware:  entry?.knownRansomwareCampaignUse === 'Known'\n  };\n}\n\nreturn Object.values(grouped).map(g => ({ json: g }));\n"
+      }
+    },
+    {
+      "id": "d805ee98-5e0c-42ce-a383-4ce6ed497418",
+      "name": "Preparar prompt IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const allItems = $input.all().map(i => i.json);\n\nconst payload = allItems.map(item => ({\n  cve:               item.cve,\n  cvss_score:        item.nvd?.cvss_score        ?? null,\n  cvss_severity:     item.nvd?.cvss_severity     ?? null,\n  epss_score:        item.epss?.score            ?? null,\n  epss_percentile:   item.epss?.percentile       ?? null,\n  in_kev:            item.kev?.in_kev            ?? false,\n  known_ransomware:  item.kev?.known_ransomware  ?? false,\n  exploit_available: item.risk?.exploit_available ?? false,\n  risk_score:        item.risk?.risk_score        ?? null,\n  risk_band:         item.risk?.band              ?? null,\n  description:       item.nvd?.description       ?? null,\n  asset:             item.asset                  ?? null,\n  exposure:          item.exposure               ?? null,\n  asset_criticality: item.asset_criticality      ?? null\n}));\n\nconst prompt = `És um analista sénior de cibersegurança no DataCoLAB.\n\nRecebes uma lista de vulnerabilidades técnicas já enriquecidas com dados NVD, EPSS e KEV. Para cada CVE, produz uma análise concisa em PORTUGUÊS DE PORTUGAL.\n\nRegras obrigatórias:\n- Devolve APENAS um array JSON válido, sem markdown, sem texto antes ou depois\n- Um objecto por CVE, na mesma ordem da lista recebida\n- Cada objecto tem exactamente estas chaves:\n  - cve (string: o ID do CVE)\n  - resumo (string: máx 2 frases sobre a vulnerabilidade)\n  - impacto_negocio (string: 1 frase contextualizada para um data lab / centro de competências de cibersegurança)\n  - accao_recomendada (string: máx 3 acções separadas por ' | ')\n  - prioridade_sugerida (string: uma de — imediata, alta, normal, baixa)\n  - justificacao (string: 1 frase mencionando CVSS, EPSS e KEV se aplicável)\n\nLista de vulnerabilidades:\n${JSON.stringify(payload, null, 2)}`;\n\nreturn [{\n  json: {\n    _all_enriched: allItems,\n    prompt: prompt\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "93fa825c-59c7-438b-a403-f1b7bf323a7b",
+      "name": "Merge Final",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -48,
+        0
+      ],
+      "parameters": {
+        "mode": "append"
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook (POST /cve-enrich)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar payload": {
+      "main": [
+        [
+          {
+            "node": "NVD API 2.0",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "EPSS (FIRST.org)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "CISA KEV (catálogo)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "ExploitDB (HTML search)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NVD API 2.0": {
+      "main": [
+        [
+          {
+            "node": "Merge NVD+EPSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EPSS (FIRST.org)": {
+      "main": [
+        [
+          {
+            "node": "Merge NVD+EPSS",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "CISA KEV (catálogo)": {
+      "main": [
+        [
+          {
+            "node": "Merge Final",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "ExploitDB (HTML search)": {
+      "main": [
+        [
+          {
+            "node": "Parse ExploitDB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse ExploitDB": {
+      "main": [
+        [
+          {
+            "node": "Merge +ExploitDB",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Consolidar + Risk Score": {
+      "main": [
+        [
+          {
+            "node": "Preparar prompt IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge análise IA": {
+      "main": [
+        [
+          {
+            "node": "Agregar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agregar resposta": {
+      "main": [
+        [
+          {
+            "node": "Construir ficheiro JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construir ficheiro JSON": {
+      "main": [
+        [
+          {
+            "node": "Gravar ficheiro JSON (disco)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Construir email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construir email": {
+      "main": [
+        [
+          {
+            "node": "Email - SOC + DevSecOps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Merge análise IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge NVD+EPSS": {
+      "main": [
+        [
+          {
+            "node": "Merge +ExploitDB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge +ExploitDB": {
+      "main": [
+        [
+          {
+            "node": "Merge Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group by CVE": {
+      "main": [
+        [
+          {
+            "node": "Consolidar + Risk Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar prompt IA": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Final": {
+      "main": [
+        [
+          {
+            "node": "Group by CVE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "c401c344-68fd-4a3e-b14b-b123c9a2edd1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1ffdf82a3991a2242a2b5b27c14612ecd17b43de142bd2cea7a7f2798dd26fc5"
+  },
+  "id": "4m0RA5RamBytWiP3",
+  "tags": [
+    {
+      "updatedAt": "2026-05-19T14:22:21.535Z",
+      "createdAt": "2026-05-19T14:22:21.535Z",
+      "id": "49yhTvck09wHP3hl",
+      "name": "cibersegurança"
+    },
+    {
+      "updatedAt": "2026-05-19T14:22:21.540Z",
+      "createdAt": "2026-05-19T14:22:21.540Z",
+      "id": "G1JCwbQE3Vagc5Jr",
+      "name": "vulnerabilidades"
+    },
+    {
+      "updatedAt": "2026-05-19T14:22:21.549Z",
+      "createdAt": "2026-05-19T14:22:21.549Z",
+      "id": "WPj12HOU8YzuugIr",
+      "name": "DataCoLAB"
+    }
+  ]
+}
