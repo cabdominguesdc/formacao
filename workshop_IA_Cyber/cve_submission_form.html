@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataCoLAB · Submissão de CVEs para Enrichment</title>
+<style>
+  :root {
+    --primary: #1F4E79;
+    --primary-light: #2E75B6;
+    --bg: #F4F6F8;
+    --card: #FFFFFF;
+    --text: #1A1A1A;
+    --muted: #6B7280;
+    --border: #D1D5DB;
+    --critical: #C00000;
+    --high: #ED7D31;
+    --medium: #BF9000;
+    --low: #548235;
+    --success: #137333;
+    --error: #B91C1C;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Calibri, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 24px;
+    line-height: 1.5;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  header {
+    background: linear-gradient(135deg, var(--primary), var(--primary-light));
+    color: #FFF;
+    padding: 24px 28px;
+    border-radius: 10px 10px 0 0;
+  }
+  header h1 { margin: 0 0 4px 0; font-size: 22px; }
+  header p { margin: 0; opacity: 0.9; font-size: 14px; }
+  .card {
+    background: var(--card);
+    padding: 24px 28px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card:last-of-type { border-radius: 0 0 10px 10px; border-bottom: none; }
+  .card h2 { font-size: 16px; color: var(--primary); margin: 0 0 16px 0; }
+  .row { display: grid; gap: 12px; }
+  .row.meta { grid-template-columns: 1fr 1fr; }
+  .row.cve { grid-template-columns: 1.6fr 1.6fr 1.2fr 1.2fr auto; align-items: end; }
+  @media (max-width: 760px) {
+    .row.meta, .row.cve { grid-template-columns: 1fr; }
+  }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+  input[type="text"], input[type="email"], select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #FFF;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--primary-light);
+    box-shadow: 0 0 0 3px rgba(46, 117, 182, 0.15);
+  }
+  input.invalid { border-color: var(--error); background: #FEF2F2; }
+  .btn {
+    padding: 9px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s, transform 0.05s;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--primary); color: #FFF; }
+  .btn-primary:hover { background: var(--primary-light); }
+  .btn-primary:disabled { background: #9CA3AF; cursor: not-allowed; }
+  .btn-secondary { background: #FFF; color: var(--primary); border: 1px solid var(--primary); }
+  .btn-secondary:hover { background: #EFF6FB; }
+  .btn-danger-ghost { background: transparent; color: var(--error); border: 1px solid transparent; padding: 8px 10px; }
+  .btn-danger-ghost:hover { background: #FEF2F2; border-color: #FCA5A5; }
+  .btn-small { padding: 6px 12px; font-size: 13px; }
+
+  .list-empty {
+    padding: 32px;
+    text-align: center;
+    color: var(--muted);
+    background: #FAFBFC;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  thead th {
+    background: #F3F4F6;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody td { padding: 10px 12px; border-bottom: 1px solid #F0F0F0; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #FAFBFC; }
+  code { font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: #FFF;
+  }
+  .badge.critical { background: var(--critical); }
+  .badge.high { background: var(--high); }
+  .badge.medium { background: var(--medium); }
+  .badge.low { background: var(--low); }
+  .badge.internet { background: #5B21B6; }
+  .badge.dmz { background: #7C3AED; }
+  .badge.internal { background: #6B7280; }
+
+  .actions-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .actions-bar .spacer { flex: 1; }
+  .summary { font-size: 13px; color: var(--muted); }
+
+  pre.preview {
+    background: #1E293B;
+    color: #E2E8F0;
+    padding: 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    max-height: 320px;
+    overflow-y: auto;
+    margin: 0;
+  }
+  .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .preview-header h3 { margin: 0; font-size: 14px; color: var(--primary); }
+  .copy-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  }
+  .copy-btn:hover { color: var(--primary); border-color: var(--primary); }
+
+  .status {
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin-top: 12px;
+    font-size: 14px;
+    display: none;
+  }
+  .status.show { display: block; }
+  .status.success { background: #DCFCE7; color: var(--success); border-left: 3px solid var(--success); }
+  .status.error   { background: #FEE2E2; color: var(--error);   border-left: 3px solid var(--error); }
+  .status.info    { background: #DBEAFE; color: var(--primary); border-left: 3px solid var(--primary); }
+
+  .endpoint-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  details.advanced { margin-top: 12px; }
+  details.advanced summary { cursor: pointer; color: var(--primary); font-size: 13px; font-weight: 600; user-select: none; }
+  details.advanced[open] summary { margin-bottom: 12px; }
+
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid #FFF;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>Submissão de CVEs · Enrichment Workflow</h1>
+    <p>DataCoLAB · alimenta o pipeline n8n com a lista a enriquecer (NVD, EPSS, KEV, ExploitDB, IA)</p>
+  </header>
+
+  <!-- ENDPOINT -->
+  <div class="card">
+    <h2>1. Endpoint do workflow</h2>
+    <div class="endpoint-row">
+      <div>
+        <label for="endpoint">URL do webhook n8n</label>
+        <input type="text" id="endpoint" value="https://n8n-workflow-automation.dev.datacolab.pt/webhook/cve-enrich">
+        <div class="hint">Default aponta para o ambiente <code>dev</code>. Substituir para produção se aplicável.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- METADATA -->
+  <div class="card">
+    <h2>2. Metadata do pedido</h2>
+    <div class="row meta">
+      <div>
+        <label for="source">Origem (source)</label>
+        <input type="text" id="source" placeholder="ex: openvas-scan-2026-05-19">
+      </div>
+      <div>
+        <label for="requestor">Requisitante (requestor)</label>
+        <input type="email" id="requestor" placeholder="ex: carlos.domingues@datacolab.pt">
+      </div>
+    </div>
+  </div>
+
+  <!-- ADICIONAR CVE -->
+  <div class="card">
+    <h2>3. Adicionar CVE</h2>
+    <div class="row cve">
+      <div>
+        <label for="cve-id">CVE ID</label>
+        <input type="text" id="cve-id" placeholder="CVE-2026-1234" autocomplete="off">
+      </div>
+      <div>
+        <label for="cve-asset">Ativo (asset)</label>
+        <input type="text" id="cve-asset" placeholder="ex: wordpress, fw-perimetro" autocomplete="off">
+      </div>
+      <div>
+        <label for="cve-exposure">Exposição</label>
+        <select id="cve-exposure">
+          <option value="internet">internet</option>
+          <option value="dmz">dmz</option>
+          <option value="internal" selected>internal</option>
+        </select>
+      </div>
+      <div>
+        <label for="cve-criticality">Criticidade</label>
+        <select id="cve-criticality">
+          <option value="critical">critical</option>
+          <option value="high">high</option>
+          <option value="medium" selected>medium</option>
+          <option value="low">low</option>
+        </select>
+      </div>
+      <div>
+        <button class="btn btn-primary" id="btn-add">Adicionar</button>
+      </div>
+    </div>
+    <div class="hint" id="add-hint">Formato esperado: <code>CVE-YYYY-NNNN</code> (mínimo 4 dígitos). Pressionar Enter no campo CVE também adiciona.</div>
+  </div>
+
+  <!-- LISTA -->
+  <div class="card">
+    <h2>4. Lista de CVEs a submeter <span class="summary" id="list-count"></span></h2>
+    <div id="list-container">
+      <div class="list-empty" id="list-empty">Sem CVEs adicionados. Usa o formulário acima para começar.</div>
+      <table id="list-table" style="display:none;">
+        <thead>
+          <tr>
+            <th>CVE</th>
+            <th>Ativo</th>
+            <th>Exposição</th>
+            <th>Criticidade</th>
+            <th style="width: 60px;"></th>
+          </tr>
+        </thead>
+        <tbody id="list-body"></tbody>
+      </table>
+    </div>
+    <div class="actions-bar">
+      <button class="btn btn-secondary btn-small" id="btn-load-example">Carregar exemplo</button>
+      <button class="btn btn-secondary btn-small" id="btn-clear">Limpar lista</button>
+      <div class="spacer"></div>
+      <button class="btn btn-primary" id="btn-submit" disabled>Submeter ao webhook</button>
+    </div>
+
+    <details class="advanced">
+      <summary>Pré-visualizar payload JSON</summary>
+      <div class="preview-header">
+        <h3>Payload que será enviado</h3>
+        <button class="copy-btn" id="btn-copy">Copiar</button>
+      </div>
+      <pre class="preview" id="json-preview">{}</pre>
+    </details>
+
+    <div class="status" id="status"></div>
+  </div>
+
+</div>
+
+<script>
+  // ====================================================
+  // Estado
+  // ====================================================
+  const state = { cves: [] };
+  const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/i;
+
+  // ====================================================
+  // Helpers
+  // ====================================================
+  const $ = (id) => document.getElementById(id);
+
+  function buildPayload() {
+    const meta = {};
+    const source = $('source').value.trim();
+    const requestor = $('requestor').value.trim();
+    if (source) meta.source = source;
+    if (requestor) meta.requestor = requestor;
+
+    const payload = { cves: state.cves };
+    if (Object.keys(meta).length) payload.meta = meta;
+    return payload;
+  }
+
+  function refreshPreview() {
+    $('json-preview').textContent = JSON.stringify(buildPayload(), null, 2);
+  }
+
+  function refreshList() {
+    const body = $('list-body');
+    const empty = $('list-empty');
+    const table = $('list-table');
+    const count = $('list-count');
+    const submit = $('btn-submit');
+
+    body.innerHTML = '';
+
+    if (state.cves.length === 0) {
+      empty.style.display = '';
+      table.style.display = 'none';
+      count.textContent = '';
+      submit.disabled = true;
+    } else {
+      empty.style.display = 'none';
+      table.style.display = '';
+      count.textContent = `· ${state.cves.length} CVE${state.cves.length === 1 ? '' : 's'}`;
+      submit.disabled = false;
+
+      state.cves.forEach((entry, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code>${escapeHtml(entry.id)}</code></td>
+          <td>${escapeHtml(entry.asset || '-')}</td>
+          <td><span class="badge ${entry.exposure}">${entry.exposure}</span></td>
+          <td><span class="badge ${entry.criticality}">${entry.criticality}</span></td>
+          <td><button class="btn btn-danger-ghost btn-small" data-idx="${idx}" title="Remover">✕</button></td>
+        `;
+        body.appendChild(tr);
+      });
+
+      body.querySelectorAll('button[data-idx]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const i = parseInt(e.currentTarget.dataset.idx, 10);
+          state.cves.splice(i, 1);
+          refreshList();
+          refreshPreview();
+        });
+      });
+    }
+
+    refreshPreview();
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function showStatus(message, type = 'info') {
+    const el = $('status');
+    el.className = `status show ${type}`;
+    el.innerHTML = message;
+  }
+  function hideStatus() {
+    $('status').className = 'status';
+  }
+
+  function addCve() {
+    const cveInput = $('cve-id');
+    const assetInput = $('cve-asset');
+    const exposureSel = $('cve-exposure');
+    const criticalitySel = $('cve-criticality');
+
+    const id = cveInput.value.trim().toUpperCase();
+    const asset = assetInput.value.trim();
+    const exposure = exposureSel.value;
+    const criticality = criticalitySel.value;
+
+    if (!CVE_PATTERN.test(id)) {
+      cveInput.classList.add('invalid');
+      $('add-hint').textContent = 'CVE inválido. Formato esperado: CVE-YYYY-NNNN (ex: CVE-2026-1234).';
+      $('add-hint').style.color = 'var(--error)';
+      return;
+    }
+    if (!asset) {
+      assetInput.classList.add('invalid');
+      $('add-hint').textContent = 'Ativo é obrigatório (campo "asset").';
+      $('add-hint').style.color = 'var(--error)';
+      return;
+    }
+    if (state.cves.some(c => c.id === id && c.asset === asset)) {
+      $('add-hint').textContent = `Duplicado: ${id} já existe para o ativo "${asset}".`;
+      $('add-hint').style.color = 'var(--error)';
+      return;
+    }
+
+    state.cves.push({ id, asset, exposure, criticality });
+
+    // reset
+    cveInput.value = '';
+    assetInput.value = '';
+    cveInput.classList.remove('invalid');
+    assetInput.classList.remove('invalid');
+    $('add-hint').textContent = 'CVE adicionado. Continua a adicionar ou submete.';
+    $('add-hint').style.color = 'var(--muted)';
+
+    refreshList();
+    cveInput.focus();
+  }
+
+  async function submitPayload() {
+    const endpoint = $('endpoint').value.trim();
+    if (!endpoint) {
+      showStatus('Endpoint vazio.', 'error');
+      return;
+    }
+    if (state.cves.length === 0) {
+      showStatus('Sem CVEs para submeter.', 'error');
+      return;
+    }
+
+    const payload = buildPayload();
+    const btn = $('btn-submit');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>A submeter...';
+    showStatus('A enviar pedido para o workflow n8n. A IA (gemma4:26b) pode demorar até 1-2 min em lotes grandes.', 'info');
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const text = await res.text();
+      let body = text;
+      try { body = JSON.stringify(JSON.parse(text), null, 2); } catch (_) { /* não é JSON */ }
+
+      if (res.ok) {
+        showStatus(
+          `<strong>Sucesso (HTTP ${res.status}).</strong> Workflow recebeu ${state.cves.length} CVE${state.cves.length === 1 ? '' : 's'}.<br>` +
+          `<pre style="margin:8px 0 0;font-size:12px;background:#FFF;padding:8px;border-radius:4px;color:#1A1A1A;overflow-x:auto;">${escapeHtml(body)}</pre>`,
+          'success'
+        );
+      } else {
+        showStatus(
+          `<strong>Erro HTTP ${res.status}.</strong><br><pre style="margin:8px 0 0;font-size:12px;background:#FFF;padding:8px;border-radius:4px;color:#1A1A1A;overflow-x:auto;">${escapeHtml(body)}</pre>`,
+          'error'
+        );
+      }
+    } catch (err) {
+      showStatus(
+        `<strong>Falha de rede ou CORS.</strong> ${escapeHtml(err.message)}.<br>` +
+        `Verificar se o n8n permite chamadas do browser (CORS) ou usar o cURL gerado abaixo.`,
+        'error'
+      );
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Submeter ao webhook';
+    }
+  }
+
+  function loadExample() {
+    $('source').value = 'openvas-scan-2026-05-19';
+    $('requestor').value = 'carlos.domingues@datacolab.pt';
+    state.cves = [
+      { id: 'CVE-2026-2994', asset: 'wordpress',    exposure: 'internet', criticality: 'critical' },
+      { id: 'CVE-2026-7256', asset: 'fw-perimetro', exposure: 'internet', criticality: 'critical' },
+	  { id: 'CVE-2026-54420', asset: 'CPanel', exposure: 'internet', criticality: 'critical' },
+      { id: 'CVE-2026-42945', asset: 'ws-rh-09',    exposure: 'internal', criticality: 'medium' }
+    ];
+    refreshList();
+    hideStatus();
+  }
+
+  function clearList() {
+    if (state.cves.length && !confirm(`Remover ${state.cves.length} CVE(s) da lista?`)) return;
+    state.cves = [];
+    refreshList();
+    hideStatus();
+  }
+
+  async function copyPreview() {
+    try {
+      await navigator.clipboard.writeText($('json-preview').textContent);
+      const btn = $('btn-copy');
+      const orig = btn.textContent;
+      btn.textContent = '✓ Copiado';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    } catch (e) {
+      alert('Não foi possível copiar: ' + e.message);
+    }
+  }
+
+  // ====================================================
+  // Bindings
+  // ====================================================
+  $('btn-add').addEventListener('click', addCve);
+  $('btn-submit').addEventListener('click', submitPayload);
+  $('btn-load-example').addEventListener('click', loadExample);
+  $('btn-clear').addEventListener('click', clearList);
+  $('btn-copy').addEventListener('click', copyPreview);
+
+  // Enter no campo CVE ou Asset adiciona
+  ['cve-id', 'cve-asset'].forEach(id => {
+    $(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addCve(); }
+    });
+    $(id).addEventListener('input', () => $(id).classList.remove('invalid'));
+  });
+
+  // Atualizar preview sempre que metadata muda
+  ['source', 'requestor'].forEach(id => {
+    $(id).addEventListener('input', refreshPreview);
+  });
+
+  // Init
+  refreshList();
+</script>
+</body>
+</html>
