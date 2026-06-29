@@ -1,0 +1,506 @@
+{
+  "name": "IOC -IP- AlienVault Gemini (OK)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ioc-intake",
+        "options": {}
+      },
+      "id": "c433129d-7632-4aa7-b4ef-680de59ce048",
+      "name": "Webhook IOC Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        352
+      ],
+      "webhookId": "ioc-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nconst rawIocs = Array.isArray(body.iocs) ? body.iocs : (body.ioc ? [body.ioc] : []);\nfunction detectType(v){\n  const s = String(v || '').trim();\n  if (!s) return 'unknown';\n  if (/^(https?:\\/\\/)/i.test(s)) return 'url';\n  if (/^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)$/.test(s)) return 'ip';\n  if (/^[a-fA-F0-9]{32}$/.test(s)) return 'md5';\n  if (/^[a-fA-F0-9]{40}$/.test(s)) return 'sha1';\n  if (/^[a-fA-F0-9]{64}$/.test(s)) return 'sha256';\n  if (/^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/i.test(s)) return 'domain';\n  return 'unknown';\n}\nreturn rawIocs.filter(Boolean).map(v => ({ json: { ioc: String(v).trim(), type: detectType(v), source: body.source || 'webhook' } }));"
+      },
+      "id": "b093b2a6-c683-49d9-8764-92726dcc04ab",
+      "name": "Normalize IOC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "no-reply@datacolab.pt",
+        "toEmail": "carlos.domingues@datacolab.pt",
+        "subject": "Report",
+        "html": "={{ $json.content.parts[1].text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1408,
+        304
+      ],
+      "id": "20e38528-4955-46ac-9f24-a30c31ff4d73",
+      "name": "Send an Email",
+      "webhookId": "be6029d2-e500-4994-b128-795790abd141",
+      "credentials": {
+        "smtp": {
+          "id": "Ay0p8YC9yPVBsrbT",
+          "name": "SMTP DataCoLAB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "GET",
+        "url": "=https://otx.alienvault.com/api/v1/indicators/IPv4/{{ $('Normalize IOC').item.json.ioc }}/general",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "alienVaultApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {},
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ef78e0f2-0327-47a5-8370-4672f1af2087",
+      "name": "AlienVault HTTP Request",
+      "extendsCredential": "alienVaultApi",
+      "credentials": {
+        "alienVaultApi": {
+          "id": "cSgF3REAfe7BUyYs",
+          "name": "AlienVault account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemma-4-31b-it",
+          "mode": "list",
+          "cachedResultName": "models/gemma-4-31b-it"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Coloca-te no lugar de um especialista de cibersegurança  e analisa os resultados do virustotal (caso existem) e do AlienVault (caso existam) \nAlienVault: {{ $json.alienvault.text }}\nVirustotal: {{ $json.virustotal }}\nPoduz um relatório em html, que deves formatar com as melhores recomendações, nomeadamente:\na) O IoC indicado está relacionado com ataques recentes? Quais?\nb) Quais os grupos APT envolvidos?\nc) Quais as recomendações para a equipa SOC?\n"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1088,
+        208
+      ],
+      "id": "b34ebffb-2369-43ba-92d6-7e6d3ab13810",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "dZIqJ59J103xeJKx",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "POST",
+        "url": "https://www.virustotal.com/api/v3/urls",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "provideSslCertificates": false,
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={\n  \"url\": \"{{ $json.ioc }}\"\n} ",
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {},
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -128,
+        480
+      ],
+      "id": "c70d81ca-a462-4058-9087-0228025aaa2e",
+      "name": "VirusTotal HTTP Request",
+      "extendsCredential": "virusTotalApi",
+      "alwaysOutputData": true,
+      "credentials": {
+        "virusTotalApi": {
+          "id": "X1Dpvzmat4Q6cgBX",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "ip",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "6d00d8d4-8552-4db7-943b-62023b44ed53"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "231b390c-f9a9-4f73-964d-37024c0de15a",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "md5",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "7c320c52-70da-4625-aeef-e512e684f6f4",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "domain",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -384,
+        336
+      ],
+      "id": "b62db1b7-f60e-485b-ba36-2249ff55adcb",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"ioc\": {{ $('AlienVault HTTP Request').item.json.indicator }},\n  \"source\": \"alienvault\"\n  \"text\": {{ JSON.stringify($json.text) }}\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        464,
+        48
+      ],
+      "id": "64dff194-ed3e-44e6-8ee4-25516e001e2d",
+      "name": "Edit Fields",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "let output = \"\";\n\nconst items = $input.all();\n\nfor (const item of items) {\n\n  const result = item.json;\n\n  const ip = result.indicator || result.ip || \"N/A\";\n  const pulses = result.pulse_info?.pulses || [];\n\n  output += `==============================\\n`;\n  output += `IOC REPORT (AlienVault OTX)\\n`;\n  output += `IP: ${ip}\\n`;\n  output += `Pulse count: ${result.pulse_info?.count || 0}\\n\\n`;\n\n  if (pulses.length === 0) {\n    output += `No pulses available\\n`;\n  } else {\n\n    pulses.forEach((pulse, index) => {\n      output += `--- Pulse ${index + 1} ---\\n`;\n      output += `Name: ${pulse.name || \"N/A\"}\\n`;\n      output += `Description: ${pulse.description || \"N/A\"}\\n`;\n      output += `Tags: ${(pulse.tags || []).join(\", \") || \"N/A\"}\\n`;\n      output += `TLP: ${pulse.TLP || \"N/A\"}\\n`;\n      output += `----------------------\\n`;\n    });\n  }\n\n  output += `==============================\\n\\n`;\n}\n\nreturn [\n  {\n    json: {\n      text: output.trim()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "288be305-9e1d-46c3-9676-d6694e9ccbd9",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = {\n  ioc: null,\n  alienvault: null,\n  virustotal: null,\n};\n\n// percorre todos os inputs disponíveis\nfor (const item of items) {\n  if (item.json.source === \"alienvault\") {\n    result.alienvault = item.json;\n    result.ioc = item.json.ioc;\n  }\n\n  if (item.json.source === \"virustotal\") {\n    result.virustotal = item.json;\n    result.ioc = item.json.ioc;\n  }\n}\n\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        192
+      ],
+      "id": "df5100c1-df03-4c28-8c5d-8de2f1932813",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "amount": 45
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        80,
+        480
+      ],
+      "id": "4b6fc85b-f53e-4cc0-8ad0-b8d9b0d202f1",
+      "name": "Wait",
+      "webhookId": "ed5f0026-12e8-4289-b4f5-10a0b25b2170"
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "GET",
+        "url": "=https://www.virustotal.com/api/v3/analyses/{{ $json.data.id }}",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {},
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        352,
+        480
+      ],
+      "id": "b220c161-2cca-4443-81da-bc1483bd637c",
+      "name": "VirusTotal HTTP Request1",
+      "extendsCredential": "virusTotalApi",
+      "alwaysOutputData": true,
+      "credentials": {
+        "virusTotalApi": {
+          "id": "X1Dpvzmat4Q6cgBX",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"ioc\": {{$('Normalize IOC').item.json.ioc}},\n  \"source\": \"virustotal\"\n  \"text\": {{ JSON.stringify($json.data) }}\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        560,
+        480
+      ],
+      "id": "4e08e354-482c-4368-9291-13280dbd1d88",
+      "name": "Edit Fields1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook IOC Intake": {
+      "main": [
+        [
+          {
+            "node": "Normalize IOC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize IOC": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AlienVault HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "AlienVault HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [],
+        [
+          {
+            "node": "VirusTotal HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "c37ba15c-ce50-430d-a407-8b9c0720092c",
+  "meta": {
+    "instanceId": "1ffdf82a3991a2242a2b5b27c14612ecd17b43de142bd2cea7a7f2798dd26fc5"
+  },
+  "id": "azlaJV36j7xjr322",
+  "tags": [
+    {
+      "updatedAt": "2026-05-19T14:22:21.535Z",
+      "createdAt": "2026-05-19T14:22:21.535Z",
+      "id": "49yhTvck09wHP3hl",
+      "name": "cibersegurança"
+    }
+  ]
+}

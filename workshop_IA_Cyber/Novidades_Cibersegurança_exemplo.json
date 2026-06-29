@@ -1,0 +1,805 @@
+{
+  "name": "Novidades_Cibersegurança",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://www.bleepingcomputer.com/feed/",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "3877f050-0620-4d61-9e48-e67f05ed533c",
+      "name": "RSS - BleepingComputer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        -304
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse RSS XML to structured items\nfunction parseRSS(xmlText, sourceName) {\n  const items = [];\n  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);\n\n  // Extract <item> blocks\n  const itemMatches = xmlText.match(/<item[^>]*>([\\s\\S]*?)<\\/item>/gi) || [];\n\n  for (const itemXml of itemMatches.slice(0, 15)) {\n    const getTag = (tag) => {\n      const match = itemXml.match(new RegExp(`<${tag}(?:[^>]*)>(?:<!\\\\[CDATA\\\\[)?([\\\\s\\\\S]*?)(?:\\\\]\\\\]>)?<\\/${tag}>`, 'i'));\n      return match ? match[1].trim().replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\") : '';\n    };\n\n    const title = getTag('title');\n    const link = getTag('link') || itemXml.match(/<link>([^<]+)<\\/link>/i)?.[1] || '';\n    const pubDate = getTag('pubDate') || getTag('dc:date') || '';\n    const description = getTag('description').substring(0, 400);\n    const category = getTag('category');\n\n    if (!title) continue;\n\n    // Date filter - last 7 days\n    let itemDate = null;\n    if (pubDate) {\n      try { itemDate = new Date(pubDate); } catch(e) {}\n    }\n    if (itemDate && !isNaN(itemDate) && itemDate < sevenDaysAgo) continue;\n\n    // Keywords for relevance scoring\n    const text = (title + ' ' + description + ' ' + category).toLowerCase();\n    let relevanceScore = 0;\n    const secKeywords = ['vulnerability', 'cve', 'exploit', 'malware', 'ransomware', 'breach', 'attack', 'zero-day', 'zero day', 'patch', 'critical', 'rce', 'backdoor', 'botnet', 'phishing', 'threat', 'security', 'ai ', 'artificial intelligence', 'llm', 'cyber'];\n    for (const kw of secKeywords) {\n      if (text.includes(kw)) relevanceScore += (kw.length > 6 ? 2 : 1);\n    }\n\n    items.push({\n      source: sourceName,\n      title,\n      link: link.trim(),\n      pubDate: itemDate ? itemDate.toISOString() : pubDate,\n      description,\n      category,\n      relevanceScore\n    });\n  }\n\n  return items.sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, 8);\n}\n\nconst inputs = $input.all();\nconst allNewsItems = [];\nconst sourceNames = [\n  'The Hacker News', 'BleepingComputer', 'Krebs on Security',\n  'Dark Reading', 'CIS Security', 'SecurityWeek',\n  'Unit42 Palo Alto', 'SANS ISC', 'Microsoft Security'\n];\n\n// The inputs arrive as separate items from the merge node\nfor (let i = 0; i < inputs.length; i++) {\n  const item = inputs[i];\n  const xmlData = item.json.data || item.json.body || (typeof item.json === 'string' ? item.json : JSON.stringify(item.json));\n  const sourceName = sourceNames[i] || `Feed ${i+1}`;\n\n  if (typeof xmlData === 'string' && xmlData.includes('<item')) {\n    const parsed = parseRSS(xmlData, sourceName);\n    allNewsItems.push(...parsed);\n  }\n}\n\n// Sort by relevance and deduplicate by title similarity\nallNewsItems.sort((a, b) => b.relevanceScore - a.relevanceScore);\n\nconst seen = new Set();\nconst deduped = [];\nfor (const item of allNewsItems) {\n  const key = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 40);\n  if (!seen.has(key)) {\n    seen.add(key);\n    deduped.push(item);\n  }\n}\n\n// Separate AI-related news\nconst aiNews = deduped.filter(i => {\n  const t = (i.title + ' ' + i.description).toLowerCase();\n  return t.includes(' ai ') || t.includes('artificial intelligence') || t.includes('machine learning') || t.includes('llm') || t.includes('generative') || t.includes('chatgpt') || t.includes('openai') || t.includes('deepseek');\n}).slice(0, 6);\n\nconst secNews = deduped.filter(i => !aiNews.includes(i)).slice(0, 12);\n\nreturn [{ json: { securityNews: secNews, aiNews: aiNews, totalItems: deduped.length } }];"
+      },
+      "id": "53b26f26-803c-4c4b-9572-7b2161adc14d",
+      "name": "Parse & Filter RSS Feeds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process NVD CVE data and EPSS scores\nconst inputs = $input.all();\n\n// Expect: [0]=critical CVEs, [1]=high CVEs, [2]=EPSS, [3]=CISA KEV\nconst criticalData = inputs[0]?.json || {};\nconst highData = inputs[1]?.json || {};\nconst epssData = inputs[2]?.json || {};\nconst kevData = inputs[3]?.json || {};\n\n// Process NVD CVEs\nfunction processCVEs(nvdResponse, maxItems = 15) {\n  const vulns = nvdResponse.vulnerabilities || [];\n  return vulns.slice(0, maxItems).map(v => {\n    const cve = v.cve || {};\n    const metrics = cve.metrics || {};\n    const cvssV31 = metrics.cvssMetricV31?.[0]?.cvssData;\n    const cvssV30 = metrics.cvssMetricV30?.[0]?.cvssData;\n    const cvssData = cvssV31 || cvssV30;\n    \n    const descriptions = cve.descriptions || [];\n    const enDesc = descriptions.find(d => d.lang === 'en')?.value || 'No description available.';\n    \n    const references = (cve.references || []).slice(0, 3).map(r => r.url);\n    \n    const weaknesses = (cve.weaknesses || []).flatMap(w => w.description || []).map(d => d.value).filter(Boolean).slice(0, 2);\n\n    return {\n      id: cve.id || 'N/A',\n      published: cve.published || '',\n      lastModified: cve.lastModified || '',\n      description: enDesc.substring(0, 500),\n      severity: cvssData?.baseSeverity || 'UNKNOWN',\n      baseScore: cvssData?.baseScore || 0,\n      attackVector: cvssData?.attackVector || '',\n      attackComplexity: cvssData?.attackComplexity || '',\n      privilegesRequired: cvssData?.privilegesRequired || '',\n      userInteraction: cvssData?.userInteraction || '',\n      scope: cvssData?.scope || '',\n      confidentialityImpact: cvssData?.confidentialityImpact || '',\n      vectorString: cvssData?.vectorString || '',\n      weaknesses: weaknesses,\n      references: references\n    };\n  });\n}\n\n// EPSS top scores\nconst epssItems = (epssData.data || []).slice(0, 15).map(e => ({\n  cveId: e.cve,\n  epssScore: parseFloat(e.epss || 0),\n  percentile: parseFloat(e.percentile || 0),\n  date: e.date\n}));\n\n// CISA KEV - recently added (last 7 days)\nconst sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);\nconst kevVulns = (kevData.vulnerabilities || []).filter(v => {\n  if (!v.dateAdded) return false;\n  try { return new Date(v.dateAdded) >= sevenDaysAgo; } catch(e) { return false; }\n}).map(v => ({\n  cveId: v.cveID,\n  vendorProject: v.vendorProject,\n  product: v.product,\n  vulnerabilityName: v.vulnerabilityName,\n  dateAdded: v.dateAdded,\n  shortDescription: (v.shortDescription || '').substring(0, 300),\n  requiredAction: v.requiredAction,\n  dueDate: v.dueDate\n}));\n\nconst criticalCVEs = processCVEs(criticalData, 10);\nconst highCVEs = processCVEs(highData, 8);\n\n// Merge all CVEs and sort by score\nconst allCVEs = [...criticalCVEs, ...highCVEs].sort((a, b) => b.baseScore - a.baseScore);\n\n// Cross-reference EPSS with CVE details\nconst epssWithDetails = epssItems.map(e => {\n  const detail = allCVEs.find(c => c.id === e.cveId);\n  return {\n    ...e,\n    severity: detail?.severity || 'UNKNOWN',\n    baseScore: detail?.baseScore || null,\n    description: detail?.description || 'Fetch from NVD for details.',\n    attackVector: detail?.attackVector || ''\n  };\n});\n\nreturn [{\n  json: {\n    criticalCVEs: criticalCVEs.slice(0, 8),\n    highCVEs: highCVEs.slice(0, 5),\n    topEPSS: epssWithDetails.slice(0, 10),\n    kevAdded: kevVulns.slice(0, 8),\n    stats: {\n      totalCritical: criticalData.totalResults || 0,\n      totalHigh: highData.totalResults || 0,\n      kevTotal: kevData.count || 0,\n      kevNewThisWeek: kevVulns.length\n    }\n  }\n}];"
+      },
+      "id": "25b50ab4-889e-4976-bf2a-f4022fa11e4f",
+      "name": "Process CVE & EPSS Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        -832
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "73f2188d-3ae7-4b2b-a771-c332edcdd960",
+      "name": "Merge RSS Feeds",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -560,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "5f00e80e-4c4c-4c24-b4b1-936c900cdf09",
+      "name": "Merge CVE Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -608,
+        -832
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "18b99e0e-81bb-4bc0-adc5-29cb0cc85125",
+      "name": "Merge All Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -224,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@datacolab.pt",
+        "toEmail": "carlos.domingues@datacolab.pt",
+        "subject": "=Report Semanal Cibersegurança",
+        "html": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "2b1bcf5c-8094-422e-bedf-ea61659765c1",
+      "name": "Send Weekly Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        592,
+        -480
+      ],
+      "webhookId": "6234573d-beed-4a95-a585-207321c346de",
+      "credentials": {
+        "smtp": {
+          "id": "Ay0p8YC9yPVBsrbT",
+          "name": "SMTP DataCoLAB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log execution result\nconst input = $input.all()[0]?.json || {};\nconsole.log('✅ Weekly Threat Intel email sent successfully');\nconsole.log('Subject:', input.subject);\nconsole.log('HTML length:', input.htmlReport?.length || 0);\nreturn [{ json: { status: 'sent', timestamp: new Date().toISOString(), subject: input.subject } }];"
+      },
+      "id": "e837e9bf-2440-4042-a937-65bfa6e8b124",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -544
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "f395d665-619b-472e-9742-108b2600adc7",
+      "name": "Every Monday 6AM1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1200,
+        -944
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pubStartDate",
+              "value": "={{ $now.minus({days: 7}).toISO().substring(0,10) }}T00:00:00.000"
+            },
+            {
+              "name": "pubEndDate",
+              "value": "={{ $now.toISO().substring(0,10) }}T23:59:59.999"
+            },
+            {
+              "name": "resultsPerPage",
+              "value": "50"
+            },
+            {
+              "name": "cvssV3Severity",
+              "value": "CRITICAL"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "d46af6d5-a58c-458e-9d22-9a14f3d386a9",
+      "name": "NVD - Critical CVEs1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        -1136
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pubStartDate",
+              "value": "={{ $now.minus({days: 7}).toISO().substring(0,10) }}T00:00:00.000"
+            },
+            {
+              "name": "pubEndDate",
+              "value": "={{ $now.toISO().substring(0,10) }}T23:59:59.999"
+            },
+            {
+              "name": "resultsPerPage",
+              "value": "30"
+            },
+            {
+              "name": "cvssV3Severity",
+              "value": "HIGH"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "e1b8c52b-e089-494c-934e-bfc5f5273a99",
+      "name": "NVD - High CVEs1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        -992
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.first.org/data/v1/epss",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "order",
+              "value": "!epss"
+            },
+            {
+              "name": "limit",
+              "value": "20"
+            },
+            {
+              "name": "days",
+              "value": "7"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "3ea6bf5a-1426-43ce-82c5-1f7d35a4cd31",
+      "name": "FIRST EPSS - Top Exploitability1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        -864
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://app.opencve.io/api/cve ",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "severity",
+              "value": "critical"
+            },
+            {
+              "name": "page",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "39ed4019-a169-4476-8ed3-844bc16ccfd5",
+      "name": "OpenCVE - Recent Critical1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        -576
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "rk0gl3tvhThxbi9N",
+          "name": "N8N - harbor"
+        },
+        "httpBearerAuth": {
+          "id": "q9Q1J8ZTV4wItPLj",
+          "name": "Bearer Auth account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://feeds.feedburner.com/TheHackersNews",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a7d4414f-fe85-420f-bd69-7678239a5cc4",
+      "name": "RSS - The Hacker News1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://krebsonsecurity.com/feed/",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "44a057e8-afaa-44fb-b5fe-cdb750f26da7",
+      "name": "RSS - Krebs on Security1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.darkreading.com/rss.xml",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "dfc17325-56a0-47ec-bc36-a239bed07974",
+      "name": "RSS - Dark Reading1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.securityweek.com/feed/",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "255c149b-0569-4793-a810-9a0bf2eaca58",
+      "name": "RSS - SecurityWeek1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://unit42.paloaltonetworks.com/feed/",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "6aee9b26-909d-4a83-b69d-590eed523718",
+      "name": "RSS - Unit42 Palo Alto1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://isc.sans.edu/rssfeed_full.xml",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "00516c0f-8c7f-4342-9604-7ddf9f74f158",
+      "name": "RSS - SANS ISC1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.microsoft.com/en-us/security/blog/feed/",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "abd3c63d-1474-4e5a-8f40-075c2b4df51b",
+      "name": "RSS - Microsoft Security1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -832,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the comprehensive prompt for Ollama LLM\nconst allInputs = $input.all();\nconst cveData = allInputs[0]?.json || {};\nconst newsData = allInputs[1]?.json || {};\n\nconst weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-PT', {day:'2-digit', month:'2-digit', year:'numeric'});\nconst weekEnd = new Date().toLocaleDateString('pt-PT', {day:'2-digit', month:'2-digit', year:'numeric'});\n\n// Format CVE data for prompt\nconst formatCVEs = (cves) => cves.map(c => \n  `- ${c.id} | CVSS: ${c.baseScore} (${c.severity}) | AV:${c.attackVector} | ${c.description.substring(0,200)}`\n).join('\\n');\n\nconst formatEPSS = (items) => items.map(e =>\n  `- ${e.cveId} | EPSS: ${(e.epssScore*100).toFixed(2)}% (${(e.percentile*100).toFixed(1)}th percentile) | ${e.description?.substring(0,150) || 'See NVD for details'}`\n).join('\\n');\n\nconst formatKEV = (items) => items.map(k =>\n  `- ${k.cveId} | ${k.vendorProject} ${k.product} | ${k.vulnerabilityName} | Due: ${k.dueDate}`\n).join('\\n');\n\nconst formatNews = (items) => items.map(n =>\n  `- [${n.source}] ${n.title} | ${n.description?.substring(0,200)}`\n).join('\\n');\n\nconst prompt = `És um especialista sénior em cibersegurança e threat intelligence. Analisa os dados da semana de ${weekStart} a ${weekEnd} e cria um relatório executivo semanal em PORTUGUÊS de Portugal, em formato HTML.\n\n## DADOS PARA ANÁLISE:\n\n### CVEs CRÍTICOS DA SEMANA (NVD):\n${formatCVEs(cveData.criticalCVEs || [])}\n\n### CVEs ELEVADOS DA SEMANA (NVD):\n${formatCVEs(cveData.highCVEs || [])}\n\n### TOP CVEs POR EPSS (maior probabilidade de exploração):\n${formatEPSS(cveData.topEPSS || [])}\n\n### CISA KEV - ADICIONADOS ESTA SEMANA (exploração ativa confirmada):\n${formatKEV(cveData.kevAdded || [])}\n\n### NOTÍCIAS DE CIBERSEGURANÇA:\n${formatNews(newsData.securityNews || [])}\n\n### NOTÍCIAS IA & SEGURANÇA:\n${formatNews(newsData.aiNews || [])}\n\n### ESTATÍSTICAS:\n- Total CVEs Críticos publicados: ${cveData.stats?.totalCritical || 0}\n- Total CVEs Elevados publicados: ${cveData.stats?.totalHigh || 0}\n- CVEs adicionados ao CISA KEV esta semana: ${cveData.stats?.kevNewThisWeek || 0}\n\n## INSTRUÇÕES PARA O RELATÓRIO HTML:\n\nCria um email HTML profissional com as seguintes secções:\n\n1. **CABEÇALHO EXECUTIVO** - Resumo de 2-3 frases do nível de ameaça da semana, com avaliação geral (Baixo/Médio/Alto/Crítico)\n\n2. **⚠️ AÇÃO IMEDIATA REQUERIDA** - CVEs no CISA KEV (exploração ativa). Para cada um: identificar sistemas afetados, impacto potencial e ação de remediação recomendada.\n\n3. **🔴 CVEs CRÍTICOS DA SEMANA** - Top 6 CVEs mais importantes. Para cada um: ID, score CVSS, vetor de ataque, sistemas afetados, impacto, e recomendação.\n\n4. **📊 TOP 8 CVEs POR EPSS** - Os com maior probabilidade de exploração ativa. Explica por que o EPSS é relevante e o que significa cada score.\n\n5. **📰 NOTÍCIAS DE CIBERSEGURANÇA** - Top 8 notícias mais relevantes, com contexto e impacto potencial para organizações.\n\n6. **🤖 IA & CIBERSEGURANÇA** - Notícias sobre IA aplicada a ataques, defesa ou novos riscos.\n\n7. **💡 RECOMENDAÇÕES DA SEMANA** - 3-5 recomendações práticas priorizadas para equipas de segurança.\n\n8. **📈 TENDÊNCIAS** - Padrões observados nos ataques e vulnerabilidades desta semana.\n\nUSA este template HTML:\n- Background: #0d1117 (dark)\n- Texto principal: #e6edf3\n- Acentos: #f0883e (laranja para crítico), #3fb950 (verde para OK), #58a6ff (azul para info)\n- Cards com border-radius: 8px, background: #161b22\n- Tabelas para CVEs com headers escuros\n- Badges coloridos por severidade: CRÍTICO=#da3633, ELEVADO=#d29922, MÉDIO=#1f6feb\n- Fonte: system-ui, -apple-system, monospace para CVE IDs\n- SEM links externos de imagens, CSS inline apenas\n- Total: email completo, bem formatado, profissional\n\nResposta APENAS com o HTML capaz de ser lido no corpo do email, e sem mais nada antes ou depois.`;\n\nreturn [{\n  json: {\n    prompt,\n    cveData,\n    newsData,\n    weekStart,\n    weekEnd,\n    stats: cveData.stats\n  }\n}];"
+      },
+      "id": "bff43d3a-924a-462f-b4af-dca8f155cb36",
+      "name": "Build LLM Prompt1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -544,
+        352
+      ],
+      "id": "95d84cf0-a833-4c82-8395-491d09de484c",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -560,
+        608
+      ],
+      "id": "9c4be47b-b4be-4675-b688-864bba1bbb5c",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -304,
+        464
+      ],
+      "id": "402e6be4-702a-4ea0-955f-380f42e5c469",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }} \nElabora  parágrafos sobre estes CVE:\n{{ JSON.stringify($json.cveData) }}\nElabora ainda parágrafos sobre estas noticias:\n{{ JSON.stringify($json.cveData.securityNews) }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        240,
+        -432
+      ],
+      "id": "4ab0a603-0850-409f-972b-49b8320ffdb9",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "gemma4:26b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmOllama",
+      "typeVersion": 1,
+      "position": [
+        336,
+        -192
+      ],
+      "id": "33397a37-627d-4800-8d7b-6dbdc60194b7",
+      "name": "Ollama Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "6k8LjugRDpmkA6tS",
+          "name": "Ollama account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "RSS - BleepingComputer": {
+      "main": [
+        [
+          {
+            "node": "Merge RSS Feeds",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge CVE Sources": {
+      "main": [
+        [
+          {
+            "node": "Process CVE & EPSS Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge RSS Feeds": {
+      "main": [
+        [
+          {
+            "node": "Parse & Filter RSS Feeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process CVE & EPSS Data": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Filter RSS Feeds": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All Data": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Prompt1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Weekly Email": {
+      "main": [
+        []
+      ]
+    },
+    "Every Monday 6AM1": {
+      "main": [
+        [
+          {
+            "node": "NVD - Critical CVEs1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "NVD - High CVEs1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FIRST EPSS - Top Exploitability1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenCVE - Recent Critical1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - The Hacker News1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - BleepingComputer",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - Krebs on Security1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - Dark Reading1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - SecurityWeek1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - Unit42 Palo Alto1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - SANS ISC1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "RSS - Microsoft Security1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NVD - Critical CVEs1": {
+      "main": [
+        [
+          {
+            "node": "Merge CVE Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NVD - High CVEs1": {
+      "main": [
+        [
+          {
+            "node": "Merge CVE Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "OpenCVE - Recent Critical1": {
+      "main": [
+        [
+          {
+            "node": "Process CVE & EPSS Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS - The Hacker News1": {
+      "main": [
+        [
+          {
+            "node": "Merge RSS Feeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM Prompt1": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS - SANS ISC1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS - SecurityWeek1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS - Unit42 Palo Alto1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "RSS - Microsoft Security1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Ollama Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Send Weekly Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "0550fa2a-42d2-4949-a31c-9ea32551a7b7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1ffdf82a3991a2242a2b5b27c14612ecd17b43de142bd2cea7a7f2798dd26fc5"
+  },
+  "id": "saMakRaXAZ1TAoPb",
+  "tags": []
+}
