@@ -1,0 +1,233 @@
+{
+  "name": "SSL Labs - Verificacao de Certificados com Decisao por IA",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "802936a9-05bd-4953-930e-ee973c6e99e5",
+      "name": "Agendamento",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        192,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const domains = [\"datacolab.pt\", \"carlosdomingues.pt\"]; // <-- ajustar lista de domínios\n\nconst config = {\n  ssllabs_email: \"carlos.domingues@datacolab.pt\", // <-- email já registado na API v4 do SSL Labs\n  script_path: \"/opt/scripts/ssllabs_cert_report.py\" // <-- caminho do script no host remoto\n};\n\nreturn domains.map(domain => ({\n  json: { domain, ...config }\n}));\n"
+      },
+      "id": "45b5e3f7-6310-4bb6-a9c0-ab0eb5a30926",
+      "name": "Configuracao de Dominios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=python3 {{$json.script_path}} --email {{$json.ssllabs_email}} \"{{$json.domain}}\" --output json --output-file /tmp/ssllabs_{{$json.domain}}.json --poll-timeout 900 > /tmp/ssllabs_{{$json.domain}}.log 2>&1; cat /tmp/ssllabs_{{$json.domain}}.json"
+      },
+      "id": "14de52ae-518f-45ee-8873-9772665b649c",
+      "name": "Executar Script (SSH remoto)",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        640,
+        0
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "n2DuEbhYB41zrjli",
+          "name": "SSH Password account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item.json;\nconst domain = $('Configuracao de Dominios').item.json.domain;\n\nlet resultado;\ntry {\n  resultado = JSON.parse(item.stdout);\n} catch (e) {\n  resultado = null;\n}\n\nconst dadosParaAnalise = resultado ?? {\n  erro: \"Não foi possível interpretar a saída do script.\",\n  raw: item.stdout,\n  stderr: item.stderr || \"\"\n};\n\nconst prompt = `Es um analista de cibersegurança sénior. Analisa o relatório técnico seguinte (JSON), produzido pelo script ssllabs_cert_report.py, sobre o(s) certificado(s) TLS do domínio \"${domain}\".\n\nRegras de decisão:\n- days_to_expiry <= 15 (ou negativo, já expirado) => ação necessária (renovar certificado).\n- days_to_expiry entre 16 e 30 => sinalizar atenção, mas não é obrigatoriamente ação imediata.\n- worst_grade igual a C, D, E, F, \"T\" (sem confiança na cadeia) ou \"M\" (mismatch) => ação necessária.\n- matches_host = false no certificado relevante para o domínio pedido => ação necessária (certificado errado ou configuração incorreta).\n- Se o campo \"erro\" estiver presente nos dados, é sempre necessária ação de verificação manual.\n- Em qualquer outro caso => sem ação necessária.\n\nResponde APENAS com JSON válido, sem comentários nem texto fora do JSON, exatamente neste formato:\n{\"domain\": \"...\", \"deve_agir\": true ou false, \"urgencia\": \"baixa\" ou \"media\" ou \"alta\", \"motivo\": \"frase curta\", \"acao_recomendada\": \"frase curta ou null se deve_agir for false\"}\n\nDados do relatório:\n${JSON.stringify(dadosParaAnalise)}`;\n\nreturn {\n  json: {\n    domain: domain,\n    resultado: dadosParaAnalise,\n    prompt\n  }\n};\n"
+      },
+      "id": "4ff40e45-6101-4854-8a06-75fc547aea39",
+      "name": "Preparar Analise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.16.0.2:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: \"llama3.3:70b\", stream: false, format: \"json\", prompt: $json.prompt } }}",
+        "options": {}
+      },
+      "id": "8bad9b18-a178-4f6c-8aae-9d638cc6b8ff",
+      "name": "Analise IA (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1072,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const domain = $('Preparar Analise').item.json.domain;\nconst item = $input.item.json;\n\nlet decisao;\ntry {\n  // O endpoint /api/generate do Ollama devolve o texto gerado no campo \"response\"\n  decisao = JSON.parse(item.response);\n} catch (e) {\n  decisao = {\n    deve_agir: true,\n    urgencia: \"media\",\n    motivo: \"Não foi possível interpretar a resposta da IA de forma automática — validar manualmente.\",\n    acao_recomendada: \"Rever manualmente o relatório do domínio.\"\n  };\n}\n\ndecisao.domain = domain;\nreturn { json: decisao };\n"
+      },
+      "id": "d089444e-6a62-4e5f-9be0-1805a4b79259",
+      "name": "Interpretar Decisao IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\n\nconst linhas = items.map(d => {\n  const tag = d.deve_agir ? \"\\u{1F534} A\\u00c7\\u00c3O NECESS\\u00c1RIA\" : \"\\u{1F7E2} SEM A\\u00c7\\u00c3O\";\n  let linha = `${tag} \\u2014 ${d.domain}\\n  Urg\\u00eancia: ${d.urgencia || 'n/d'}\\n  Motivo: ${d.motivo || 'n/d'}`;\n  if (d.deve_agir && d.acao_recomendada) {\n    linha += `\\n  A\\u00e7\\u00e3o recomendada: ${d.acao_recomendada}`;\n  }\n  return linha;\n});\n\nconst algumaAcao = items.some(d => d.deve_agir);\n\nreturn {\n  json: {\n    resumo: linhas.join(\"\\n\\n\"),\n    algumaAcaoNecessaria: algumaAcao,\n    total_dominios: items.length,\n    dominios_com_acao: items.filter(d => d.deve_agir).map(d => d.domain)\n  }\n};\n"
+      },
+      "id": "fc72d9df-3828-4785-96df-434806ecfea6",
+      "name": "Construir Resumo Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@datacolab.pt",
+        "toEmail": "carlos.domingues@datacolab.pt",
+        "subject": "=SSL Labs - {{$json.algumaAcaoNecessaria ? \"ACAO NECESSARIA\" : \"Tudo OK\"}}",
+        "html": "={{ $json.resumo }}",
+        "options": {}
+      },
+      "id": "6bc3278b-4e37-4720-bc84-4ed994091c5c",
+      "name": "Enviar Notificacao",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1744,
+        0
+      ],
+      "webhookId": "86699428-4b33-4992-bc43-e6024a28b893",
+      "credentials": {
+        "smtp": {
+          "id": "ARFVG4XfjLa0NSiF",
+          "name": "Mailjet"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Agendamento": {
+      "main": [
+        [
+          {
+            "node": "Configuracao de Dominios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuracao de Dominios": {
+      "main": [
+        [
+          {
+            "node": "Executar Script (SSH remoto)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar Script (SSH remoto)": {
+      "main": [
+        [
+          {
+            "node": "Preparar Analise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Analise": {
+      "main": [
+        [
+          {
+            "node": "Analise IA (Ollama)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analise IA (Ollama)": {
+      "main": [
+        [
+          {
+            "node": "Interpretar Decisao IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar Decisao IA": {
+      "main": [
+        [
+          {
+            "node": "Construir Resumo Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construir Resumo Final": {
+      "main": [
+        [
+          {
+            "node": "Enviar Notificacao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "6778702f-63a9-45d2-a0d1-dc47b278a62c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1ffdf82a3991a2242a2b5b27c14612ecd17b43de142bd2cea7a7f2798dd26fc5"
+  },
+  "nodeGroups": [],
+  "id": "O9rcgMasBWcqzOYx",
+  "tags": []
+}
