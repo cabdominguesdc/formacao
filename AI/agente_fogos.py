@@ -37,13 +37,15 @@ import requests
 # Configuração (via variáveis de ambiente — ver .env.example)
 # --------------------------------------------------------------------------
 
-# Fonte de dados de incêndios ativos.
-# NOTA: este é o endpoint não-oficial usado pelo próprio site fogos.pt.
-# A fogos.pt passou a exigir registo para a API oficial (https://api.fogos.pt/docs/).
-# Se este endpoint deixar de responder, regista-te lá e ajusta FOGOS_API_URL
-# e, se necessário, o cabeçalho de autenticação em fetch_active_fires().
-FOGOS_API_URL = os.getenv("FOGOS_API_URL", "https://api-dev.fogos.pt/new/fires")
-FOGOS_API_KEY = os.getenv("FOGOS_API_KEY", "")  # só é usado se a API oficial exigir chave
+# Fonte de dados de incêndios ativos — API oficial da fogos.pt (requer registo e chave).
+# Ver README para instruções de registo. Se precisares de voltar ao endpoint
+# não-oficial (sem chave, mas sujeito a limitação de pedidos), define FOGOS_API_URL
+# como https://api-dev.fogos.pt/new/fires e limpa FOGOS_API_KEY.
+FOGOS_API_URL = os.getenv("FOGOS_API_URL", "https://api.fogos.pt/v2/incidents/active")
+FOGOS_API_KEY = os.getenv("FOGOS_API_KEY", "")
+FOGOS_API_KEY_HEADER = os.getenv("FOGOS_API_KEY_HEADER", "X-API-Key")
+FOGOS_API_KEY_PREFIX = os.getenv("FOGOS_API_KEY_PREFIX", "")  # a API oficial usa a chave "nua", sem "Bearer "
+FOGOS_MAX_RETRIES = int(os.getenv("FOGOS_MAX_RETRIES", "3"))
 
 # Área a monitorizar. CONCELHO vazio = todo o distrito.
 FILTER_DISTRICT = os.getenv("FIRE_DISTRICT", "Coimbra")
@@ -94,20 +96,45 @@ log = logging.getLogger("fire-watch-agent")
 # --------------------------------------------------------------------------
 
 def fetch_active_fires() -> list:
-    """Vai buscar a lista completa de incêndios (ativos e recentes) à fonte configurada."""
+    """Vai buscar a lista completa de incêndios (ativos e recentes) à fonte configurada.
+
+    Em caso de 429 (Too Many Requests), respeita o cabeçalho Retry-After do servidor
+    (se vier) e tenta novamente até FOGOS_MAX_RETRIES vezes, com backoff progressivo.
+    """
     headers = {}
     if FOGOS_API_KEY:
-        headers["Authorization"] = f"Bearer {FOGOS_API_KEY}"
+        headers[FOGOS_API_KEY_HEADER] = f"{FOGOS_API_KEY_PREFIX}{FOGOS_API_KEY}"
 
-    resp = requests.get(FOGOS_API_URL, headers=headers, timeout=15)
-    resp.raise_for_status()
-    payload = resp.json()
+    last_exc = None
+    for attempt in range(1, FOGOS_MAX_RETRIES + 1):
+        resp = requests.get(FOGOS_API_URL, headers=headers, timeout=15)
 
-    if isinstance(payload, dict) and "data" in payload:
-        return payload.get("data", [])
-    if isinstance(payload, list):
-        return payload
-    raise RuntimeError("Formato de resposta da API de incêndios não reconhecido.")
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After")
+            wait = int(retry_after) if retry_after and retry_after.isdigit() else attempt * 10
+            log.warning(
+                "429 Too Many Requests (tentativa %d/%d). A aguardar %ds antes de repetir. "
+                "Corpo da resposta: %s",
+                attempt, FOGOS_MAX_RETRIES, wait, resp.text[:300],
+            )
+            last_exc = requests.exceptions.HTTPError(
+                f"429 Client Error: Too Many Requests for url: {FOGOS_API_URL}", response=resp
+            )
+            if attempt < FOGOS_MAX_RETRIES:
+                time.sleep(wait)
+                continue
+            raise last_exc
+
+        resp.raise_for_status()
+        payload = resp.json()
+
+        if isinstance(payload, dict) and "data" in payload:
+            return payload.get("data", [])
+        if isinstance(payload, list):
+            return payload
+        raise RuntimeError("Formato de resposta da API de incêndios não reconhecido.")
+
+    raise last_exc
 
 
 def _normalize(text) -> str:
