@@ -1,0 +1,61 @@
+"""
+title: Fogos.pt
+author: Open WebUI
+description: Consulta informação sobre incêndios em Portugal através da API do Fogos.pt
+version: 1.0.0
+"""
+
+from pydantic import BaseModel, Field
+import httpx
+
+
+class Tools:
+
+    class Valves(BaseModel):
+        api_key: str = Field(
+            default="",
+            description="API key do Fogos.pt"
+        )
+
+    def __init__(self):
+        self.valves = self.Valves()
+
+    async def incendios_ativos(self) -> str:
+        """
+        Obtém os incêndios/ocorrências atualmente ativos em Portugal.
+
+        :return: Lista de ocorrências ativas com localização, estado,
+        meios e outras informações disponíveis.
+        """
+
+        if not self.valves.api_key:
+            return "Erro: a API key do Fogos.pt não está configurada."
+
+        url = "https://api.fogos.pt/v2/incidents/active"
+
+        headers = {
+            "X-API-Key": self.valves.api_key,
+            "User-Agent": "OpenWebUI-FogosPT/1.0"
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.get(
+                    url,
+                    headers=headers
+                )
+
+                response.raise_for_status()
+
+                data = response.json()
+
+                return str(data)
+
+        except httpx.HTTPStatusError as e:
+            return (
+                f"Erro da API Fogos.pt: "
+                f"HTTP {e.response.status_code}"
+            )
+
+        except Exception as e:
+            return f"Erro ao consultar Fogos.pt: {str(e)}"
