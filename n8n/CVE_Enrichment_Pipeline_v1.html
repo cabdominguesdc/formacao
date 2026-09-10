@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Priorização de CVEs — DataCoLAB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0E141B;
+    --surface: #161E29;
+    --surface-raised: #1D2733;
+    --border: #2A3644;
+    --text: #E7ECF2;
+    --text-muted: #8A96A6;
+    --accent: #4E9BE0;
+    --accent-dim: #2E4A63;
+    --critical: #E5484D;
+    --high: #F0883E;
+    --medium: #E8C13D;
+    --low: #4FAE7A;
+    --unknown: #6B7686;
+    --sans: 'IBM Plex Sans', -apple-system, Segoe UI, Roboto, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 56px 20px 80px;
+  }
+
+  main {
+    width: 100%;
+    max-width: 640px;
+  }
+
+  header {
+    margin-bottom: 32px;
+  }
+
+  header h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+
+  header p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    max-width: 52ch;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 11px 13px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+
+  input[type="text"]::placeholder {
+    color: #5A6576;
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--accent);
+  }
+
+  button {
+    font-family: var(--sans);
+    font-weight: 500;
+    font-size: 0.9rem;
+    border-radius: 7px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  .chip button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  #add-btn {
+    background: var(--surface-raised);
+    border-color: var(--border);
+    color: var(--text);
+    padding: 0 18px;
+  }
+
+  #add-btn:hover { border-color: var(--accent); }
+
+  .hint {
+    margin: 8px 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  .hint.warn {
+    color: var(--high);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 6px 5px 10px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+  }
+
+  .chip button {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    width: 18px;
+    height: 18px;
+    line-height: 1;
+    font-size: 0.95rem;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+  }
+
+  .chip button:hover {
+    color: var(--critical);
+    background: rgba(229, 72, 77, 0.12);
+  }
+
+  .empty-note {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-top: 16px;
+  }
+
+  .submit-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 24px;
+  }
+
+  #submit-btn {
+    background: var(--accent);
+    color: #071018;
+    padding: 11px 22px;
+    font-weight: 600;
+  }
+
+  #submit-btn:hover:not(:disabled) { background: #63AAE8; }
+
+  #submit-btn:disabled {
+    background: var(--accent-dim);
+    color: #4A5A68;
+    cursor: not-allowed;
+  }
+
+  #status {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: -2px;
+    margin-right: 7px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #results-panel {
+    display: none;
+  }
+
+  #results-panel.visible {
+    display: block;
+    animation: rise 0.35s ease;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  #results-panel h2 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0 0 14px;
+  }
+
+  #results-output {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+    border-left: 2px solid var(--accent);
+    padding-left: 16px;
+    max-height: 480px;
+    overflow-y: auto;
+  }
+
+  #error-panel {
+    display: none;
+    border-color: rgba(229, 72, 77, 0.4);
+    background: rgba(229, 72, 77, 0.07);
+  }
+
+  #error-panel.visible {
+    display: block;
+    animation: rise 0.35s ease;
+  }
+
+  #error-panel h2 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0 0 8px;
+    color: var(--critical);
+  }
+
+  #error-panel p {
+    margin: 0 0 6px;
+    font-size: 0.85rem;
+    color: var(--text);
+    line-height: 1.55;
+  }
+
+  #error-detail {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 10px;
+    word-break: break-word;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #results-panel.visible,
+    #error-panel.visible,
+    .spinner { animation: none; }
+  }
+
+  @media (max-width: 480px) {
+    .input-row { flex-direction: column; }
+    #add-btn { padding: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<main>
+  <header>
+    <h1>Priorização de CVEs</h1>
+    <p>Adiciona os CVEs identificados numa análise ou scan. Cada um é consultado na NVD e ordenado por prioridade de remediação.</p>
+  </header>
+
+  <section class="panel">
+    <label for="cve-input">Identificador CVE</label>
+    <div class="input-row">
+      <input
+        type="text"
+        id="cve-input"
+        placeholder="CVE-2024-3094"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <button id="add-btn" type="button">Adicionar</button>
+    </div>
+    <p class="hint" id="input-hint">Escreve um CVE e prime Enter, ou cola vários separados por vírgula ou espaço.</p>
+
+    <div class="chips" id="chip-list"></div>
+    <p class="empty-note" id="empty-note">Ainda não adicionaste nenhum CVE.</p>
+
+    <div class="submit-row">
+      <button id="submit-btn" type="button" disabled>Priorizar CVEs</button>
+      <span id="status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section class="panel" id="results-panel" aria-live="polite">
+    <h2>Resultado da priorização</h2>
+    <div id="results-output"></div>
+  </section>
+
+  <section class="panel" id="error-panel" aria-live="assertive">
+    <h2>Não foi possível obter o resultado</h2>
+    <p id="error-message"></p>
+    <div id="error-detail"></div>
+  </section>
+</main>
+
+<script>
+  const ENDPOINT = 'https://n8n-workflow-automation.dev.datacolab.pt/webhook-test/cve-priority';
+  const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/;
+
+  const input = document.getElementById('cve-input');
+  const addBtn = document.getElementById('add-btn');
+  const chipList = document.getElementById('chip-list');
+  const emptyNote = document.getElementById('empty-note');
+  const submitBtn = document.getElementById('submit-btn');
+  const statusEl = document.getElementById('status');
+  const hintEl = document.getElementById('input-hint');
+  const resultsPanel = document.getElementById('results-panel');
+  const resultsOutput = document.getElementById('results-output');
+  const errorPanel = document.getElementById('error-panel');
+  const errorMessage = document.getElementById('error-message');
+  const errorDetail = document.getElementById('error-detail');
+
+  const defaultHint = hintEl.textContent;
+  let cves = [];
+
+  function render() {
+    chipList.innerHTML = '';
+    cves.forEach((cve) => {
+      const chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.innerHTML = `<span>${cve}</span>`;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.textContent = '×';
+      removeBtn.setAttribute('aria-label', `Remover ${cve}`);
+      removeBtn.addEventListener('click', () => {
+        cves = cves.filter((c) => c !== cve);
+        render();
+      });
+      chip.appendChild(removeBtn);
+      chipList.appendChild(chip);
+    });
+    emptyNote.style.display = cves.length ? 'none' : 'block';
+    submitBtn.disabled = cves.length === 0;
+  }
+
+  function addFromInput() {
+    const raw = input.value.trim();
+    if (!raw) return;
+
+    const tokens = raw.split(/[\s,]+/).filter(Boolean);
+    const invalid = [];
+
+    tokens.forEach((token) => {
+      const candidate = token.toUpperCase();
+      if (CVE_PATTERN.test(candidate)) {
+        if (!cves.includes(candidate)) cves.push(candidate);
+      } else {
+        invalid.push(token);
+      }
+    });
+
+    input.value = '';
+    render();
+
+    if (invalid.length) {
+      hintEl.textContent = `Ignorado (formato inválido, esperado CVE-AAAA-NNNN): ${invalid.join(', ')}`;
+      hintEl.classList.add('warn');
+    } else {
+      hintEl.textContent = defaultHint;
+      hintEl.classList.remove('warn');
+    }
+  }
+
+  addBtn.addEventListener('click', addFromInput);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addFromInput();
+    }
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    if (!cves.length) return;
+
+    resultsPanel.classList.remove('visible');
+    errorPanel.classList.remove('visible');
+    submitBtn.disabled = true;
+    statusEl.innerHTML = '<span class="spinner"></span>A consultar a NVD e a IA…';
+
+    try {
+      const response = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cves })
+      });
+
+      if (!response.ok) {
+        throw new Error(`O endpoint respondeu com o estado ${response.status}.`);
+      }
+
+      const data = await response.json();
+      const text = data.priorities || data.output || JSON.stringify(data, null, 2);
+
+      resultsOutput.textContent = text;
+      resultsPanel.classList.add('visible');
+      statusEl.textContent = '';
+    } catch (err) {
+      errorMessage.textContent = 'Verifica se o workflow n8n está ativo e à escuta. O webhook de teste (/webhook-test/) só responde uma vez, depois de clicares em "Test workflow" no editor — para uso contínuo, ativa o workflow e usa o URL de produção (/webhook/).';
+      errorDetail.textContent = err.message || String(err);
+      errorPanel.classList.add('visible');
+      statusEl.textContent = '';
+    } finally {
+      submitBtn.disabled = cves.length === 0;
+    }
+  });
+
+  render();
+</script>
+
+</body>
+</html>
