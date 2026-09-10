@@ -1,0 +1,180 @@
+{
+  "name": "CVE Priority - NVD Enrichment + AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cve-priority",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [260, 300],
+      "id": "1-webhook",
+      "name": "Receive CVE List",
+      "webhookId": "cve-priority"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst list = body.cves || body.cve_list || [];\n\nif (!Array.isArray(list) || list.length === 0) {\n  throw new Error('Nenhuma lista de CVEs encontrada no campo \"cves\" do body. Exemplo esperado: { \"cves\": [\"CVE-2024-3094\", \"CVE-2023-4863\"] }');\n}\n\nreturn list.map(id => ({\n  json: {\n    cve: String(id).trim().toUpperCase()\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "id": "2-normalize",
+      "name": "Normalize CVE List"
+    },
+    {
+      "parameters": {
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "cveId",
+              "value": "={{ $json.cve }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300],
+      "id": "3-nvd-query",
+      "name": "Query NVD API",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $json;\nconst originalCve = $('Normalize CVE List').item.json.cve;\n\n// Falha de rede/HTTP (o node anterior continua em erro em vez de parar)\nif (item.error) {\n  return [{\n    json: {\n      cve: originalCve,\n      found: false,\n      error: typeof item.error === 'string' ? item.error : JSON.stringify(item.error)\n    }\n  }];\n}\n\nconst vulnerabilities = item.vulnerabilities;\n\nif (!vulnerabilities || vulnerabilities.length === 0) {\n  return [{\n    json: {\n      cve: originalCve,\n      found: false,\n      error: 'CVE nao encontrado na NVD (verificar o formato do ID ou se ja foi publicado)'\n    }\n  }];\n}\n\nconst cve = vulnerabilities[0].cve;\nconst description = (cve.descriptions.find(d => d.lang === 'en') || {}).value || '';\n\nconst metrics = cve.metrics || {};\nlet baseScore = null;\nlet severity = null;\nlet vector = null;\n\nconst metricSource = metrics.cvssMetricV31 || metrics.cvssMetricV30 || metrics.cvssMetricV2 || [];\nif (metricSource.length > 0) {\n  baseScore = metricSource[0].cvssData.baseScore;\n  severity = metricSource[0].cvssData.baseSeverity || metricSource[0].baseSeverity || null;\n  vector = metricSource[0].cvssData.vectorString;\n}\n\nconst weaknesses = (cve.weaknesses || [])\n  .flatMap(w => (w.description || []).filter(d => d.lang === 'en').map(d => d.value));\n\nreturn [{\n  json: {\n    cve: cve.id,\n    found: true,\n    published: cve.published,\n    lastModified: cve.lastModified,\n    description,\n    baseScore,\n    severity,\n    vector,\n    cwe: weaknesses,\n    references: (cve.references || []).slice(0, 5).map(r => r.url)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300],
+      "id": "4-extract",
+      "name": "Extract CVE Details"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "cves"
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1140, 300],
+      "id": "5-aggregate",
+      "name": "Combine All CVEs"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "llama3.1"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [1300, 480],
+      "id": "6-ollama",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analisa a seguinte lista de CVEs, ja enriquecidas com dados da NVD, e ordena-as por prioridade de remediacao:\n\n{{ JSON.stringify($json.cves, null, 2) }}",
+        "options": {
+          "systemMessage": "Es um analista de gestao de vulnerabilidades. Recebes uma lista de CVEs com CVSS base score, severidade, descricao e CWE (podem existir entradas com found=false, sem dados). Ordena-as por prioridade de remediacao (mais critico primeiro), considerando por esta ordem: 1) CVSS base score, 2) severidade, 3) tipo de vulnerabilidade (RCE e escalonamento de privilegios tem prioridade sobre DoS ou divulgacao de informacao), 4) o tipo de exposicao tipico do CWE identificado. Para cada CVE devolve: posicao no ranking, ID do CVE, score, justificacao breve (1-2 frases) e acao recomendada (ex: patch imediato, patch na proxima janela de manutencao, monitorizar). Para CVEs nao encontrados na NVD, assinala-os no fim da lista como 'sem dados suficientes'. Responde em portugues de Portugal, em formato de lista numerada clara."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [1300, 300],
+      "id": "7-agent",
+      "name": "Prioritize Remediation"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"priorities\": $json.output } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1520, 300],
+      "id": "8-respond",
+      "name": "Return Priority List"
+    }
+  ],
+  "connections": {
+    "Receive CVE List": {
+      "main": [
+        [
+          { "node": "Normalize CVE List", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Normalize CVE List": {
+      "main": [
+        [
+          { "node": "Query NVD API", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Query NVD API": {
+      "main": [
+        [
+          { "node": "Extract CVE Details", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Extract CVE Details": {
+      "main": [
+        [
+          { "node": "Combine All CVEs", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Combine All CVEs": {
+      "main": [
+        [
+          { "node": "Prioritize Remediation", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          { "node": "Prioritize Remediation", "type": "ai_languageModel", "index": 0 }
+        ]
+      ]
+    },
+    "Prioritize Remediation": {
+      "main": [
+        [
+          { "node": "Return Priority List", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
