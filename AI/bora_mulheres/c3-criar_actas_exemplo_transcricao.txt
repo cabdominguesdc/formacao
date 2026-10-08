@@ -1,0 +1,147 @@
+A transcrição foi iniciada.
+Marta Ribeiro · 00:00:04
+Bom dia a todos. Estão a ouvir-me bem? Paulo, Sofia, bem-vindos.
+Paulo Antunes · 00:00:09
+Bom dia, Marta. Ouvimos bem, sim. A Sofia está aqui comigo na sala, estamos os dois no mesmo portátil.
+Sofia Mendes · 00:00:14
+Bom dia a todos.
+Marta Ribeiro · 00:00:16
+Ótimo. O Tiago e a Inês já cá estão, o Rui deve estar a entrar. Ah, aí está. Rui, ouves-nos?
+Rui Pacheco · 00:00:23
+Sim, sim, desculpem o atraso, estava a terminar um deploy no ambiente de testes. Bom dia.
+Marta Ribeiro · 00:00:29
+Sem problema. Então, a agenda de hoje é a habitual, vou só partilhar no chat para ficar registada.
+Marta Ribeiro · 00:00:35 (mensagem no chat)
+Agenda:
+1. Ponto de situação do Sprint 6
+2. Problemas técnicos e riscos
+3. Pedidos do cliente
+4. Recursos necessários para a fase seguinte
+5. Próximos passos e datas
+Marta Ribeiro · 00:00:52
+Com o ponto de situação: estamos na semana 11 de 20. Do ponto de vista global, o projeto está dentro do prazo, mas temos um ponto amarelo na migração da base de dados, que o Tiago vai detalhar. Tiago, queres começar?
+Tiago Lopes · 00:01:06
+Claro. Vou partilhar o ecrã. Conseguem ver o diagrama?
+Paulo Antunes · 00:01:12
+Sim, está visível.
+Tiago Lopes · 00:01:14
+Então, resumindo o que fechámos neste sprint:
+• A VPC de produção e a de qualidade estão criadas, com as subnets privadas e públicas separadas.
+• O cluster EKS de qualidade está operacional, com três nós.
+• O portal de clientes já corre em qualidade desde sexta-feira.
+• A ligação VPN site-to-site ao armazém da Maia foi testada e está estável.
+O que ficou por fazer foi a migração de dados do ERP. Fizemos a primeira carga de teste e demorou quase nove horas, quando o objetivo era fazer tudo numa janela de quatro.
+Paulo Antunes · 00:01:58
+Nove horas? Isso preocupa-me bastante. A nossa janela de paragem no fim de semana é de seis horas, no máximo.
+Tiago Lopes · 00:02:05
+Sim, percebemos. Já identificámos a causa principal, mas deixo a Inês explicar porque foi ela que analisou os logs.
+Inês Carvalho · 00:02:12
+Ok. Basicamente, o problema não é a largura de banda, é a forma como estávamos a exportar. Estávamos a usar um dump lógico tabela a tabela, e há três tabelas de movimentos de stock com mais de 400 milhões de registos que estrangulam o processo.
+Sofia Mendes · 00:02:28
+Desculpem, só uma pergunta. Essas são as tabelas do histórico de movimentos? Porque nós, na operação, raramente consultamos dados com mais de três anos.
+Inês Carvalho · 00:02:37
+Exatamente essas. E isso é uma informação muito útil, Sofia, já lá vamos.
+Rui Pacheco · 00:02:41
+Do meu lado, só para completar o ponto de situação: as APIs de integração com o portal estão todas migradas e os testes automáticos passam a 94%. Os 6% que falham são casos de faturação com IVA de autoliquidação, que estou a corrigir esta semana.
+Transcrição – Parte 2: problemas técnicos, riscos e pedidos do cliente
+Marta Ribeiro · 00:03:05
+Obrigada, Rui. Passando ao ponto dois. Inês, retomando a questão da Sofia sobre o histórico: qual é a proposta?
+Inês Carvalho · 00:03:12
+A nossa proposta é separar a migração em duas fases. Vou explicar a sequência que pensámos:
+1. Migrar antecipadamente, durante a semana e sem paragem, todo o histórico com mais de três anos, que é só de leitura.
+2. Ativar replicação contínua com o AWS DMS para as tabelas ativas, para irem sincronizando em segundo plano.
+3. No fim de semana da passagem, parar as escritas no ERP antigo e esperar que a replicação apanhe as últimas alterações.
+4. Validar as contagens de registos e os totais contabilísticos.
+5. Mudar o DNS e as ligações das aplicações para a nova base de dados.
+Com isto, estimamos que a janela de paragem real fique entre duas e três horas.
+Paulo Antunes · 00:03:58
+Isso parece-me bem mais razoável. Mas tenho uma dúvida: durante a semana, essa replicação não vai pesar no servidor de produção atual? Já temos queixas de lentidão ao fim do dia.
+Tiago Lopes · 00:04:09
+Boa questão. O DMS lê os logs de transações, não faz consultas pesadas às tabelas, por isso o impacto costuma ser baixo. Mas, por precaução, propomos fazer a carga inicial do histórico à noite, entre as 22h e as 6h.
+Sofia Mendes · 00:04:22
+Atenção que às quintas à noite temos o fecho de inventário do armazém da Maia. Nessa noite não convém mexer em nada.
+Marta Ribeiro · 00:04:29
+Anotado. Quintas-feiras à noite ficam excluídas. Sofia, há mais alguma janela que devamos evitar?
+Sofia Mendes · 00:04:35
+O último dia útil de cada mês, por causa do fecho contabilístico. E a semana de 16 a 20 de novembro, que é a nossa campanha de Black Friday com os clientes de retalho.
+Paulo Antunes · 00:04:47
+Essa é crítica. Se a passagem a produção cair nessa semana, eu não aprovo.
+Marta Ribeiro · 00:04:52
+Perfeitamente entendido. Isso tem impacto direto no calendário, já vou falar disso nos próximos passos. Antes disso, quero rever os riscos. Pus a lista atualizada no chat.
+Marta Ribeiro · 00:05:04 (mensagem no chat)
+Riscos ativos:
+• R1 – Janela de migração do ERP superior à paragem permitida (alto; mitigação: migração faseada com DMS)
+• R2 – Falha nos testes de faturação com autoliquidação de IVA (médio; correção em curso pelo Rui)
+• R3 – Sobreposição com a campanha de Black Friday (alto; novo, identificado hoje)
+• R4 – Dependência de credenciais de acesso ao ERP antigo, ainda partilhadas por email (alto; segurança)
+Inês Carvalho · 00:05:30
+Sobre o R4, queria reforçar. Ainda estamos a receber passwords da base de dados antiga por email, e isso é um problema de segurança sério. Precisamos de as passar para o Secrets Manager e de rodar todas as credenciais depois da migração.
+Paulo Antunes · 00:05:46
+Tem razão. Isso foi um atalho nosso no início. A partir de hoje, combinamos assim: as credenciais passam a ser partilhadas só através do cofre de passwords da empresa. Eu falo com a equipa interna.
+Rui Pacheco · 00:05:58
+Só para não me esquecer, Paulo: para fechar os testes do IVA, preciso de uns cinco ou seis exemplos reais de faturas com autoliquidação, anonimizadas. Consegue arranjar isso?
+Sofia Mendes · 00:06:08
+Eu trato disso com a contabilidade. Até sexta envio-lhe.
+Marta Ribeiro · 00:06:13
+Perfeito. Paulo, do vosso lado, há mais algum pedido ou preocupação que queiram levantar?
+Paulo Antunes · 00:06:19
+Sim, duas coisas. Primeiro, a administração pediu-me uma estimativa do custo mensal da AWS depois da passagem a produção. Segundo, queremos que os utilizadores-chave tenham formação no novo portal antes do arranque, não depois.
+Tiago Lopes · 00:06:35
+Sobre os custos, consigo preparar uma estimativa com base no Pricing Calculator e nos consumos do ambiente de qualidade. Dou-lhe também um cenário com instâncias reservadas, que reduz bastante o valor.
+Paulo Antunes · 00:06:47
+Ótimo, preciso disso até ao fim do mês para levar à reunião de administração.
+Transcrição – Parte 3: recursos, próximos passos e encerramento
+Marta Ribeiro · 00:07:02
+Passando ao ponto quatro, os recursos para a fase seguinte. Tiago, fizeste o levantamento?
+Tiago Lopes · 00:07:08
+Sim. Para as próximas seis semanas, precisamos do seguinte:
+• Do lado da Atlântico Sistemas:
+    ◦ Um DBA sénior a tempo parcial durante três semanas, para afinar a replicação e validar os dados
+    ◦ Mais um nó no cluster EKS de qualidade, para os testes de carga
+    ◦ Uma instância de replicação AWS DMS dedicada durante o período de sincronização
+• Do lado da Vinhais Logística:
+    ◦ Dois utilizadores-chave disponíveis cerca de quatro horas por semana para os testes de aceitação
+    ◦ Um técnico interno com acesso de administrador ao servidor do ERP antigo nas noites de carga
+    ◦ Aprovação de orçamento para o acréscimo de custos AWS durante a fase de dupla operação
+Paulo Antunes · 00:07:44
+Os dois utilizadores-chave, a Sofia e mais uma pessoa da faturação, estão garantidos. O técnico também. O orçamento tenho de confirmar, mas não deve haver problema se vier acompanhado da estimativa de custos que falámos.
+Marta Ribeiro · 00:07:58
+Combinado. Então o ponto cinco: próximos passos. Com a restrição da Black Friday, a data prevista de passagem a produção, 14 e 15 de novembro, fica demasiado apertada. A minha proposta é passar para o fim de semana de 28 e 29 de novembro.
+Sofia Mendes · 00:08:15
+Hum… a segunda-feira a seguir, dia 30, é o último dia útil do mês. É dia de fecho contabilístico. Se houver algum problema no arranque, apanha-nos em cheio.
+Paulo Antunes · 00:08:24
+Bem visto. Prefiro não arriscar.
+Marta Ribeiro · 00:08:27
+Tem toda a razão. Então propomos o fim de semana de 5 e 6 de dezembro. Tem ainda a vantagem de a terça, dia 8, ser feriado, o que nos dá margem se for preciso. Paulo, concorda?
+Paulo Antunes · 00:08:39
+Concordo. 5 e 6 de dezembro.
+Marta Ribeiro · 00:08:42
+Perfeito. Vou ler a sequência de próximos passos, para confirmarmos responsáveis e datas:
+1. Rui – corrigir os testes de faturação com autoliquidação de IVA, depois de receber as faturas de exemplo (até 16 de outubro)
+2. Sofia – enviar ao Rui as faturas anonimizadas (até 9 de outubro)
+3. Paulo – migrar todas as credenciais do ERP antigo para o cofre de passwords e deixar de as enviar por email (até 12 de outubro)
+4. Inês – configurar o AWS DMS e iniciar a carga noturna do histórico, excluindo quintas-feiras (início a 19 de outubro)
+5. Tiago – entregar a estimativa de custos AWS mensal, com e sem instâncias reservadas (até 23 de outubro)
+6. Paulo – confirmar a aprovação do orçamento para a fase de dupla operação (até 30 de outubro)
+7. Equipa técnica – ensaio geral da passagem a produção em qualidade (14 de novembro)
+8. Marta – organizar duas sessões de formação para os utilizadores-chave no novo portal (semana de 23 de novembro)
+9. Todos – passagem a produção (5 e 6 de dezembro)
+Inês Carvalho · 00:09:41
+Marta, no ponto quatro, acrescenta por favor que preciso do técnico do Paulo disponível na primeira noite, para validarmos juntos os acessos.
+Marta Ribeiro · 00:09:48
+Acrescentado. Paulo, isso é possível?
+Paulo Antunes · 00:09:51
+Sim, eu combino com ele.
+Rui Pacheco · 00:09:54
+Desculpem, perdi uma parte, a ligação caiu uns segundos. A data do ensaio geral ficou 14 de novembro?
+Marta Ribeiro · 00:10:01
+Sim, sábado, 14 de novembro. Tudo o resto fica na ata.
+Marta Ribeiro · 00:10:05
+Mais alguma questão antes de terminarmos? Não? Então resumo as decisões: migração faseada com DMS, nova data de passagem a produção a 5 e 6 de dezembro, credenciais só através do cofre de passwords e formação antes do arranque. Envio a ata ainda hoje e a próxima reunião de acompanhamento fica para dia 21, à mesma hora.
+Paulo Antunes · 00:10:28
+Obrigado a todos, foi uma reunião produtiva.
+Sofia Mendes · 00:10:31
+Obrigada, bom trabalho.
+Tiago Lopes · 00:10:33
+Obrigado, até dia 21.
+A transcrição foi parada.
